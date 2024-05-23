@@ -259,13 +259,6 @@ in {
             description = "The true identifier of this secret as used in `age.secrets`.";
           };
 
-          packages = mkOption {
-            type = types.listOf types.pkg;
-            default = [];
-            description = "The packages needed to use this generator.  This helps avoid inter-machine differences in the generator scripts, which agenix-rekey will error on.";
-            example = literalExpression "[ pkgs.openssl ]";
-          };
-
           rekeyFile = mkOption {
             type = types.nullOr types.path;
             default =
