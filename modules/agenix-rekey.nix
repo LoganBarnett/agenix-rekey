@@ -280,6 +280,23 @@ in {
             '';
           };
 
+          settings = mkOption {
+            type = types.nullOr types.attrs;
+            default = null;
+            example = literalExpression ''
+              {
+                validity = 365;
+                subject = {
+                  country = "Gondor";
+                  state = "";
+                  location = "Minas Tirith";
+                  organization = "Rangers of Ithilien";
+                  organization-unit = "Rangers of Ithilien";
+                };
+              }
+            '';
+          };
+
           generator = mkOption {
             type = types.nullOr generatorType;
             default = null;
