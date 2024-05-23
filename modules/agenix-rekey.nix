@@ -250,52 +250,82 @@ in {
   options.age = {
     # Extend age.secrets with new options
     secrets = mkOption {
-      type = types.attrsOf (types.submodule (submod: {
-        options = {
-          id = mkOption {
-            type = types.str;
-            default = submod.config._module.args.name;
-            readOnly = true;
-            description = "The true identifier of this secret as used in `age.secrets`.";
+      type = types.attrsOf (
+        types.submodule (submod: {
+          options = {
+            id = mkOption {
+              type = types.str;
+              default = submod.config._module.args.name;
+              readOnly = true;
+              description = "The true identifier of this secret as used in `age.secrets`.";
+            };
+
+            intermediary = mkOption {
+              type = types.bool;
+              default = false;
+              description = ''
+                Whether the secret is only required as an intermediary/repository
+                secret and should not be uploaded and decrypted on the host.
+              '';
+            };
+
+            rekeyFile = mkOption {
+              type = types.nullOr types.path;
+              default =
+                if config.age.rekey.generatedSecretsDir != null then
+                  config.age.rekey.generatedSecretsDir + "/${submod.config.id}.age"
+                else
+                  null;
+              example = literalExpression "./secrets/password.age";
+              description = ''
+                The path to the encrypted .age file for this secret. The file must
+                be encrypted with one of the given `age.rekey.masterIdentities` and not with
+                a host-specific key.
+
+                This secret will automatically be rekeyed for hosts that use it, and the resulting
+                host-specific .age file will be set as actual `file` attribute. So naturally this
+                is mutually exclusive with specifying `file` directly.
+
+                If you want to avoid having a `secrets.nix` file and only use rekeyed secrets,
+                you should always use this option instead of `file`.
+              '';
+            };
+
+            generator = mkOption {
+              type = types.nullOr generatorType;
+              default = null;
+              example = {
+                script = "passphrase";
+              };
+              description = "If defined, this generator will be used to bootstrap this secret's when it doesn't exist.";
+            };
+            settings = mkOption {
+              type = types.nullOr types.attrs;
+              default = null;
+              description = "Settings to provide to a specific secret.";
+              example = literalExpression ''
+                {
+                  validity = 365;
+                  subject = {
+                    country = "Gondor";
+                    state = "";
+                    location = "Minas Tirith";
+                    organization = "Rangers of Ithilien";
+                    organization-unit = "Rangers of Ithilien";
+                  };
+                }
+              '';
+            };
           };
-
-          rekeyFile = mkOption {
-            type = types.nullOr types.path;
-            default =
-              if config.age.rekey.generatedSecretsDir != null
-              then config.age.rekey.generatedSecretsDir + "/${submod.config.id}.age"
-              else null;
-            example = literalExpression "./secrets/password.age";
-            description = ''
-              The path to the encrypted .age file for this secret. The file must
-              be encrypted with one of the given `age.rekey.masterIdentities` and not with
-              a host-specific key.
-
-              This secret will automatically be rekeyed for hosts that use it, and the resulting
-              host-specific .age file will be set as actual `file` attribute. So naturally this
-              is mutually exclusive with specifying `file` directly.
-
-              If you want to avoid having a `secrets.nix` file and only use rekeyed secrets,
-              you should always use this option instead of `file`.
-            '';
+          config = {
+            # Produce a rekeyed age secret
+            file = mkIf (submod.config.rekeyFile != null) (
+              if config.age.rekey.storageMode == "derivation"
+              then "${rekeyedSecrets}/${submod.config.name}.age"
+              else rekeyedLocalSecret config.age.secrets.${submod.config.id}
+            );
           };
-
-          generator = mkOption {
-            type = types.nullOr generatorType;
-            default = null;
-            example = {script = "passphrase";};
-            description = "If defined, this generator will be used to bootstrap this secret's when it doesn't exist.";
-          };
-        };
-        config = {
-          # Produce a rekeyed age secret
-          file = mkIf (submod.config.rekeyFile != null) (
-            if config.age.rekey.storageMode == "derivation"
-            then "${rekeyedSecrets}/${submod.config.name}.age"
-            else rekeyedLocalSecret config.age.secrets.${submod.config.id}
-          );
-        };
-      }));
+        }));
     };
 
     generators = mkOption {
