@@ -14,8 +14,7 @@
     filter
     flip
     foldl'
-    # hasAttr
-    
+    hasAttr
     hasPrefix
     head
     length
@@ -78,15 +77,15 @@
     then set
     else
       # Assert that the generator is the same if it was defined on multiple hosts
-      # assert assertMsg (hasAttr sourceFile set -> script == set.${sourceFile}.script)
-      # "Generator definition of ${secretName} on ${host} differs from definitions on other hosts: ${concatStringsSep "," set.${sourceFile}.defs}";
-      set
-      // {
-        ${sourceFile} = {
-          inherit secret sourceFile secretName script;
-          defs = (set.${sourceFile}.defs or []) ++ ["${host}:${secretName}"];
+      assert assertMsg (hasAttr sourceFile set -> script == set.${sourceFile}.script)
+      "Generator definition of ${secretName} on ${host} differs from definitions on other hosts: ${concatStringsSep "," set.${sourceFile}.defs}";
+        set
+        // {
+          ${sourceFile} = {
+            inherit secret sourceFile secretName script;
+            defs = (set.${sourceFile}.defs or []) ++ ["${host}:${secretName}"];
+          };
         };
-      };
 
   # Collects all secrets that have generators across all hosts.
   # Deduplicates secrets if the generator is the same, otherwise throws an error.
