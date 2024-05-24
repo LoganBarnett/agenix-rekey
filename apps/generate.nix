@@ -6,8 +6,7 @@
   inherit
     (pkgs.lib)
     any
-    # assertMsg
-    
+    assertMsg
     attrNames
     attrValues
     concatStringsSep
