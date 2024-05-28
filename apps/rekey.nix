@@ -67,6 +67,7 @@
           if [[ -e ${secretOut} ]] && [[ "$FORCE" != true ]]; then
             echo "[1;90m    Skipping[m [90m[already rekeyed] "${escapeShellArg hostName}":"${escapeShellArg secretName}"[m"
           else
+            set -x
             mkdir -p ${rekeyedSecrets.cacheDir}/secrets
             rm ${secretOut}.tmp &>/dev/null || true
             echo "[1;32m    Rekeying[m [90m"${escapeShellArg hostName}":[34m"${escapeShellArg secretName}"[m"
