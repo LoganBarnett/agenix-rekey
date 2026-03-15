@@ -6,7 +6,6 @@
 //! prompt the user exactly once.
 
 use age::armor::{ArmoredReader, ArmoredWriter, Format};
-use rpassword::prompt_password;
 use std::io::{BufReader, Cursor, Read, Write};
 use std::path::Path;
 use thiserror::Error;
@@ -127,6 +126,25 @@ impl IdentitySession {
   }
 }
 
+// ── Passphrase reading ────────────────────────────────────────────────────────
+
+/// Read a passphrase, preferring `/dev/tty` so stdin redirection doesn't
+/// interfere.  Falls back to stdin if `/dev/tty` is unavailable (e.g. when
+/// launched by `nix run` on macOS which may have no controlling terminal).
+fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
+  match rpassword::prompt_password(prompt.as_ref()) {
+    Ok(p) => Ok(p),
+    // ENXIO (6) = no controlling terminal; ENODEV also maps here on some OS.
+    // In that case fall back to reading from stdin (user may have the TTY on
+    // stdin, or may pipe the passphrase for automation).
+    Err(e) if e.raw_os_error() == Some(6) => {
+      eprint!("{}", prompt.as_ref());
+      rpassword::read_password_from_bufread(&mut std::io::stdin().lock())
+    }
+    Err(e) => Err(e),
+  }
+}
+
 // ── Identity file loading ─────────────────────────────────────────────────────
 
 /// Load a plain (non-encrypted) age identity file.
@@ -179,7 +197,7 @@ fn load_passphrase_identity_file(
     });
   }
 
-  let passphrase_str = prompt_password(format!(
+  let passphrase_str = read_passphrase(format!(
     "Enter passphrase for identity file {}: ",
     path.display()
   ))
