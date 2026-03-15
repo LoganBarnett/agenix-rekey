@@ -50,5 +50,8 @@ tempfile = "3"
 # Hashing (for rekey ident hash computation)
 sha2 = "0.10"
 
+# POSIX system calls (ttyname, isatty — for passphrase terminal detection)
+libc = "0.2"
+
 # Shared library
 ragenix-rekey-lib = { path = "crates/lib" }

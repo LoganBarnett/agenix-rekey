@@ -132,13 +132,13 @@ impl IdentitySession {
 ///
 /// Tries the following sources in order:
 /// 1. `/dev/tty` — works when the process has a controlling terminal.
-/// 2. `/dev/fd/2` / `/dev/stderr` — works under `nix run` on macOS, where
-///    the process has no controlling terminal but stderr is still connected to
-///    the user's real terminal device.  Opening the terminal via its raw path
-///    bypasses the controlling-terminal requirement and allows `tcsetattr` to
-///    suppress echo normally.
-/// 3. `stdin` — last resort; echo cannot be suppressed but the user can still
-///    type (or pipe) the passphrase.
+/// 2. The actual terminal device via `ttyname(2)` — works under `nix run` on
+///    macOS, where the process has no controlling terminal (ENXIO on
+///    `/dev/tty`) but stderr is still connected to the user's real terminal
+///    device (e.g. `/dev/ttys004`).  Opening the device directly with O_RDWR
+///    bypasses the controlling-terminal requirement while still supporting
+///    `tcsetattr` for echo suppression.
+/// 3. `stdin` — last resort; echo cannot be suppressed if stdin is a pipe.
 fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
   match rpassword::prompt_password(prompt.as_ref()) {
     Ok(p) => return Ok(p),
@@ -146,21 +146,42 @@ fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
     _ => {} // ENXIO — no controlling terminal; try alternatives below
   }
 
-  // Print the prompt to stderr so the user sees it regardless of how we read.
-  eprint!("{}", prompt.as_ref());
-
-  // Try to open a read handle to the terminal via the stderr file descriptor.
-  // /dev/fd/2 and /dev/stderr are both paths to fd 2 on macOS and Linux; when
-  // stderr is a terminal they provide a readable handle that supports tcsetattr,
-  // allowing rpassword to suppress echo even without a controlling terminal.
-  for tty_path in &["/dev/fd/2", "/dev/stderr"] {
-    if let Ok(tty) = std::fs::File::open(tty_path) {
+  // /dev/tty failed. Find the actual terminal device that stderr is connected
+  // to (e.g. /dev/ttys004 on macOS) and open it directly with O_RDWR.
+  // This works because opening the terminal device path directly does not
+  // require a controlling terminal, but does support tcsetattr for echo control.
+  #[cfg(unix)]
+  if let Some(tty_path) = terminal_path_from_fd(2).or_else(|| terminal_path_from_fd(1)) {
+    if let Ok(tty) = std::fs::OpenOptions::new().read(true).write(true).open(&tty_path) {
+      use std::io::Write;
+      // Write prompt to the terminal device itself (stdout/stderr may be pipes).
+      if let Ok(mut w) = tty.try_clone() {
+        let _ = write!(w, "{}", prompt.as_ref());
+      }
       return rpassword::read_password_from_bufread(&mut std::io::BufReader::new(tty));
     }
   }
 
-  // Final fallback: stdin (may be a pipe/redirected; echo suppression may fail).
+  // Final fallback: print prompt to stderr and read from stdin.
+  eprint!("{}", prompt.as_ref());
   rpassword::read_password_from_bufread(&mut std::io::stdin().lock())
+}
+
+/// Return the path of the terminal device that file descriptor `fd` is
+/// connected to, or `None` if it is not a terminal.
+///
+/// Uses `libc::ttyname` which is POSIX but not thread-safe; we call it only
+/// from a single-threaded context during identity loading.
+#[cfg(unix)]
+fn terminal_path_from_fd(fd: i32) -> Option<String> {
+  use std::ffi::CStr;
+  // Safety: ttyname(3) returns a pointer to a static string that is valid
+  // until the next call.  We copy it immediately into a String.
+  let ptr = unsafe { libc::ttyname(fd) };
+  if ptr.is_null() {
+    return None;
+  }
+  unsafe { CStr::from_ptr(ptr) }.to_str().ok().map(|s| s.to_string())
 }
 
 // ── Identity file loading ─────────────────────────────────────────────────────
