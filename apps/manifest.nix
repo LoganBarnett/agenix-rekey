@@ -68,8 +68,8 @@ let
         )
       ) (attrNames nodes);
     in
-    warnIf (length matchingHosts > 1)
-      "Multiple hosts provide a secret with rekeyFile=[33m${toString secret.rekeyFile}[m, which may have undesired side effects when used in secret generator dependencies."
+    warnIf (length matchingHosts > 1 && !(secret.intermediary or false))
+      "Multiple hosts provide a secret with rekeyFile=${toString secret.rekeyFile}, which may have undesired side effects when used in secret generator dependencies."
       (head matchingHosts);
 
   # ── Collect secrets with generators ─────────────────────────────────────────
