@@ -181,9 +181,12 @@ let
     {
       pubkey = removeSuffix "\n" node.config.age.rekey.hostPubkey;
       storageMode = node.config.age.rekey.storageMode;
+      # Store as a flake-relative path (e.g. "./secrets/rekeyed/hostname") so
+      # the Rust binary can resolve it against CWD (the user's actual flake
+      # root) at runtime, rather than against the read-only Nix store copy.
       localStorageDir =
         if node.config.age.rekey.localStorageDir != null then
-          builtins.unsafeDiscardStringContext (toString node.config.age.rekey.localStorageDir)
+          relativeToFlake node.config.age.rekey.localStorageDir
         else
           null;
       secrets = mapAttrs (secretName: secret: {

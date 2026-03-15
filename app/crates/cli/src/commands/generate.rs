@@ -97,14 +97,17 @@ pub struct GenerateArgs {
 /// know there is at least one entry that actually needs (re)generation.
 /// A no-op run (all secrets up-to-date) exits without touching identities.
 pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError> {
-  let flake_dir = &manifest.flake_dir;
+  // `manifest.flake_dir` is the Nix store copy of the user's flake (read-only).
+  // All output is written relative to CWD, which must be the user's actual
+  // flake root (same contract as the bash generate script).
+  let cwd = std::env::current_dir()?;
 
   // Validate filter paths up-front for a clear error message.
   for f in &args.filter {
     let known = manifest
       .generate
       .iter()
-      .any(|e| e.path == *f || flake_dir.join(&e.path) == PathBuf::from(f));
+      .any(|e| e.path == *f || cwd.join(&e.path) == PathBuf::from(f));
     if !known {
       return Err(GenerateError::UnknownFilterPath(f.clone()));
     }
@@ -116,8 +119,8 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
     .iter()
     .filter(|e| wants_entry(e, &args.filter, &args.tags))
     .filter(|e| {
-      let output_path = flake_dir.join(&e.path);
-      args.force || !output_path.exists() || deps_are_newer(e, &output_path, flake_dir)
+      let output_path = cwd.join(&e.path);
+      args.force || !output_path.exists() || deps_are_newer(e, &output_path, &cwd)
     })
     .collect();
 
@@ -140,8 +143,8 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
   let count = to_generate.len();
   for entry in to_generate {
     tracing::info!(path = %entry.path, defs = ?entry.defs, "generating");
-    let output_path = flake_dir.join(&entry.path);
-    generate_entry(entry, &output_path, flake_dir, args.add_to_git, &session)?;
+    let output_path = cwd.join(&entry.path);
+    generate_entry(entry, &output_path, &cwd, args.add_to_git, &session)?;
   }
 
   tracing::info!(generated = count, "generate complete");

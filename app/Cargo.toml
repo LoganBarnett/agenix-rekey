@@ -33,8 +33,8 @@ serde_json = "1.0"
 # Error handling
 thiserror = "2.0"
 
-# age encryption
-age = { version = "0.11", features = ["armor"] }
+# age encryption (armor = ASCII armor; ssh = SSH recipient/identity key support)
+age = { version = "0.11", features = ["armor", "ssh"] }
 
 # Passphrase prompting (used when loading passphrase-protected identity files)
 rpassword = "7"

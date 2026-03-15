@@ -100,7 +100,12 @@ pub struct RekeyArgs {
 /// Identity loading (and any passphrase prompt) is deferred until after we
 /// know there is at least one secret that actually needs rekeying.
 pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
+  // `manifest.flake_dir` is the Nix store copy of the user's flake (read-only)
+  // and is used only for reading source `.age` files during decryption.
+  // All output paths are resolved relative to CWD, which must be the user's
+  // actual flake root (same contract as the bash rekey script).
   let flake_dir = &manifest.flake_dir;
+  let cwd = std::env::current_dir()?;
 
   // Partition hosts, warn about unsupported modes.
   let mut local_hosts: Vec<(&String, &HostConfig)> = Vec::new();
@@ -143,7 +148,9 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
   let mut work: Vec<WorkItem> = Vec::new();
 
   for (hostname, host) in &local_hosts {
-    let storage_dir = PathBuf::from(host.local_storage_dir.as_ref().unwrap());
+    // `local_storage_dir` is a flake-relative path (e.g. "./secrets/rekeyed/host").
+    // Resolve against CWD so writes go to the user's actual filesystem.
+    let storage_dir = cwd.join(host.local_storage_dir.as_ref().unwrap());
     let mut pending = Vec::new();
     let mut all_outputs = HashSet::new();
 
@@ -245,7 +252,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
       let status = std::process::Command::new("git")
         .arg("add")
         .arg(&item.storage_dir)
-        .current_dir(flake_dir)
+        .current_dir(&cwd)
         .status()?;
       if !status.success() {
         tracing::warn!(path = %item.storage_dir.display(), "git add returned non-zero");

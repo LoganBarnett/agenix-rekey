@@ -352,12 +352,22 @@ pub fn parse_recipient_string(
         pubkey: s.to_string(),
         reason: e.to_string(),
       })
+  } else if s.starts_with("ssh-ed25519 ") || s.starts_with("ssh-rsa ") {
+    // SSH public keys are valid age recipients (age native SSH support).
+    // ParseRecipientKeyError doesn't implement Display; use Debug.
+    s.parse::<age::ssh::Recipient>()
+      .map(|r| Box::new(r) as Box<dyn age::Recipient + Send>)
+      .map_err(|e| IdentityError::InvalidPubkey {
+        pubkey: s.to_string(),
+        reason: format!("{:?}", e),
+      })
   } else if s.starts_with('/') {
     parse_first_recipient_from_file(Path::new(s))
   } else {
     Err(IdentityError::InvalidPubkey {
       pubkey: s.to_string(),
-      reason: "unrecognized format (expected age1... or absolute path to recipient file)"
+      reason: "unrecognized format (expected age1..., ssh-ed25519/ssh-rsa key, \
+               or absolute path to recipient file)"
         .to_string(),
     })
   }
