@@ -20,7 +20,7 @@ mod config;
 
 use clap::Parser;
 use config::{CliRaw, Command, Config, ConfigError};
-use ragenix_rekey_lib::{init_logging, manifest::Manifest, IdentitySession};
+use ragenix_rekey_lib::{init_logging, manifest::Manifest};
 use std::path::Path;
 use thiserror::Error;
 
@@ -47,9 +47,6 @@ enum ApplicationError {
     #[source]
     source: serde_json::Error,
   },
-
-  #[error("Failed to load identities: {0}")]
-  Identity(#[from] ragenix_rekey_lib::IdentityError),
 
   #[error("Generate failed: {0}")]
   Generate(#[from] GenerateError),
@@ -80,17 +77,13 @@ fn run(config: Config) -> Result<(), ApplicationError> {
       tags,
     } => {
       let manifest = load_manifest(config.manifest.as_deref())?;
-      let session =
-        IdentitySession::load(&manifest.master_identities, &manifest.extra_encryption_pubkeys)?;
-
       let args = GenerateArgs {
         force,
         add_to_git,
         tags,
         filter,
       };
-
-      commands::generate::run(&args, &manifest, &session)?;
+      commands::generate::run(&args, &manifest)?;
       Ok(())
     }
 

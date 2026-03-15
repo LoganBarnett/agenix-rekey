@@ -45,6 +45,9 @@ pub enum GenerateError {
   #[error("no encryption recipients available; add a pubkey to at least one master identity")]
   NoRecipients,
 
+  #[error("failed to load identities: {0}")]
+  Identity(#[from] IdentityError),
+
   #[error("failed to decrypt dependency {dep} for {secret}: {source}")]
   DepDecrypt {
     dep: String,
@@ -87,64 +90,56 @@ pub struct GenerateArgs {
 }
 
 /// Run the generate command.
-pub fn run(
-  args: &GenerateArgs,
-  manifest: &Manifest,
-  session: &IdentitySession,
-) -> Result<(), GenerateError> {
-  if session.recipients.is_empty() {
-    return Err(GenerateError::NoRecipients);
-  }
-
+///
+/// Identity loading (and any passphrase prompt) is deferred until after we
+/// know there is at least one entry that actually needs (re)generation.
+/// A no-op run (all secrets up-to-date) exits without touching identities.
+pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError> {
   let flake_dir = &manifest.flake_dir;
 
   // Validate filter paths up-front for a clear error message.
   for f in &args.filter {
-    let known = manifest.generate.iter().any(|e| {
-      e.path == *f || flake_dir.join(&e.path) == PathBuf::from(f)
-    });
+    let known = manifest
+      .generate
+      .iter()
+      .any(|e| e.path == *f || flake_dir.join(&e.path) == PathBuf::from(f));
     if !known {
       return Err(GenerateError::UnknownFilterPath(f.clone()));
     }
   }
 
-  let mut generated = 0usize;
-  let mut skipped = 0usize;
+  // Determine which entries need (re)generation before loading identities.
+  let to_generate: Vec<&GenerateEntry> = manifest
+    .generate
+    .iter()
+    .filter(|e| wants_entry(e, &args.filter, &args.tags))
+    .filter(|e| {
+      let output_path = flake_dir.join(&e.path);
+      args.force || !output_path.exists() || deps_are_newer(e, &output_path, flake_dir)
+    })
+    .collect();
 
-  for entry in &manifest.generate {
-    if !wants_entry(entry, &args.filter, &args.tags) {
-      continue;
-    }
+  if to_generate.is_empty() {
+    tracing::info!("nothing to generate (all secrets up to date)");
+    return Ok(());
+  }
 
+  // Load identities now — may prompt for passphrases.
+  let session =
+    IdentitySession::load(&manifest.master_identities, &manifest.extra_encryption_pubkeys)?;
+
+  if session.recipients.is_empty() {
+    return Err(GenerateError::NoRecipients);
+  }
+
+  let count = to_generate.len();
+  for entry in to_generate {
+    tracing::info!(path = %entry.path, defs = ?entry.defs, "generating");
     let output_path = flake_dir.join(&entry.path);
-
-    let needs_regen = args.force
-      || !output_path.exists()
-      || deps_are_newer(entry, &output_path, flake_dir);
-
-    if !needs_regen {
-      tracing::info!(
-        path = %entry.path,
-        "skipping (up to date)"
-      );
-      skipped += 1;
-      continue;
-    }
-
-    tracing::info!(
-      path = %entry.path,
-      defs = ?entry.defs,
-      "generating"
-    );
-
-    generate_entry(entry, &output_path, flake_dir, args.add_to_git, session)?;
-    generated += 1;
+    generate_entry(entry, &output_path, flake_dir, args.add_to_git, &session)?;
   }
 
-  if generated > 0 || skipped > 0 {
-    tracing::info!(generated, skipped, "generate complete");
-  }
-
+  tracing::info!(generated = count, "generate complete");
   Ok(())
 }
 
