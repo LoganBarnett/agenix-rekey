@@ -381,6 +381,23 @@ in
               description = "The true identifier of this secret as used in `age.secrets`.";
             };
 
+            shared = mkOption {
+              type = types.bool;
+              default = false;
+              description = ''
+                When `true`, suppresses the warning that fires when the same
+                `rekeyFile` is referenced by secrets on multiple hosts.
+
+                Sharing a secret across hosts is perfectly fine — the warning
+                exists only to flag accidental duplication when the secret is
+                also used as a **generator dependency**, because
+                `agenix-rekey` must pick one host to associate the dependency
+                with and an unexpected choice could cause confusion.  Set this
+                to `true` if the sharing is intentional and the warning is
+                noise for your setup.
+              '';
+            };
+
             intermediary = mkOption {
               type = types.bool;
               default = false;

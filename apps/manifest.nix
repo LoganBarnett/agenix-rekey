@@ -68,8 +68,8 @@ let
         )
       ) (attrNames nodes);
     in
-    warnIf (length matchingHosts > 1 && !(secret.intermediary or false))
-      "Multiple hosts provide a secret with rekeyFile=${toString secret.rekeyFile}, which may have undesired side effects when used in secret generator dependencies."
+    warnIf (length matchingHosts > 1 && !(secret.intermediary or false) && !(secret.shared or false))
+      "Secret '${secret.id}' (rekeyFile=${toString secret.rekeyFile}) is defined on multiple hosts; '${head matchingHosts}' was picked arbitrarily for dep.host. This is only a concern if your generator script branches on dep.host — if it doesn't, set age.secrets.${secret.id}.shared = true to silence this warning."
       (head matchingHosts);
 
   # ── Collect secrets with generators ─────────────────────────────────────────

@@ -58,8 +58,8 @@ let
         )
       ) (attrNames nodes);
     in
-    warnIf (length matchingHosts > 1)
-      "Multiple hosts provide a secret with rekeyFile=[33m${toString secret.rekeyFile}[m, which may have undesired side effects when used in secret generator dependencies."
+    warnIf (length matchingHosts > 1 && !(secret.shared or false))
+      "Secret '${secret.id}' (rekeyFile=[33m${toString secret.rekeyFile}[m) is defined on multiple hosts; '[33m${head matchingHosts}[m' was picked arbitrarily for dep.host. This is only a concern if your generator script branches on dep.host — if it doesn't, set [32mage.secrets.${secret.id}.shared = true[m to silence this warning."
       (head matchingHosts);
 
   # Add the given secret to the set, indexed by its relative path.
