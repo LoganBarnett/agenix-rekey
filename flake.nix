@@ -105,10 +105,23 @@
                 pkgs' = import inputs.nixpkgs {
                   inherit system;
                 };
+                craneLib = inputs.crane.mkLib pkgs';
+                ragenixBinary = craneLib.buildPackage {
+                  src = "${inputs.self}/app";
+                  pname = "ragenix-rekey";
+                  version = "0.1.0";
+                  cargoExtraArgs = "--bin ragenix-rekey";
+                };
+                # Map app names to alternate implementation files.
+                # "generate" uses the Rust runtime; apps/generate.nix (the
+                # original bash version) is kept for reference during transition.
+                appImpls = {
+                  generate = "rust-generate";
+                };
               in
               lib.genAttrs allApps (
                 app:
-                import ./apps/${app}.nix {
+                import ./apps/${appImpls.${app} or app}.nix {
                   nodes = import ./nix/select-nodes.nix {
                     inherit
                       nodes
@@ -119,7 +132,7 @@
                       ;
                     inherit (pkgs') lib;
                   };
-                  inherit userFlake agePackage;
+                  inherit userFlake agePackage ragenixBinary;
                   pkgs = pkgs';
                 }
               )

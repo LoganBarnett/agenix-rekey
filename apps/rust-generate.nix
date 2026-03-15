@@ -1,0 +1,20 @@
+# Rust-based replacement for apps/generate.nix.
+#
+# Builds the JSON manifest (apps/manifest.nix) at Nix eval time and wraps the
+# ragenix-rekey binary in a shell script that passes the manifest path at
+# runtime.  All flags ($@) are forwarded to `ragenix-rekey generate`, so
+# --force / -a / --tags / paths all work as expected.
+{
+  pkgs,
+  ragenixBinary,
+  ...
+}@inputs:
+let
+  manifest = import ./manifest.nix inputs;
+in
+pkgs.writeShellScriptBin "agenix-generate" ''
+  exec ${ragenixBinary}/bin/ragenix-rekey \
+    --manifest ${manifest} \
+    generate \
+    "$@"
+''
