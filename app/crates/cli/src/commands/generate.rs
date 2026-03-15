@@ -26,6 +26,8 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use crate::status;
+
 use ragenix_rekey_lib::{
   decrypt_file, encrypt_to_recipients, IdentityError, IdentitySession,
 };
@@ -114,15 +116,18 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
   }
 
   // Determine which entries need (re)generation before loading identities.
-  let to_generate: Vec<&GenerateEntry> = manifest
-    .generate
-    .iter()
-    .filter(|e| wants_entry(e, &args.filter, &args.tags))
-    .filter(|e| {
-      let output_path = cwd.join(&e.path);
-      args.force || !output_path.exists() || deps_are_newer(e, &output_path, &cwd)
-    })
-    .collect();
+  // Iterate every in-scope entry so we can print a status line for each one,
+  // including those that are already up to date.
+  let mut to_generate: Vec<&GenerateEntry> = Vec::new();
+
+  for entry in manifest.generate.iter().filter(|e| wants_entry(e, &args.filter, &args.tags)) {
+    let output_path = cwd.join(&entry.path);
+    if !args.force && output_path.exists() && !deps_are_newer(entry, &output_path, &cwd) {
+      status::skipped(&entry.path);
+    } else {
+      to_generate.push(entry);
+    }
+  }
 
   if to_generate.is_empty() {
     tracing::info!("nothing to generate (all secrets up to date)");
@@ -142,7 +147,7 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
 
   let count = to_generate.len();
   for entry in to_generate {
-    tracing::info!(path = %entry.path, defs = ?entry.defs, "generating");
+    tracing::debug!(path = %entry.path, defs = ?entry.defs, "generating");
     let output_path = cwd.join(&entry.path);
     generate_entry(entry, &output_path, &cwd, args.add_to_git, &session)?;
   }
@@ -296,7 +301,7 @@ fn generate_entry(
   }
   std::fs::write(output_path, &ciphertext)?;
 
-  tracing::info!(path = %entry.path, bytes = ciphertext.len(), "written");
+  status::generated(&entry.path);
 
   if add_to_git {
     let status = std::process::Command::new("git")

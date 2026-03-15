@@ -17,6 +17,7 @@
 
 mod commands;
 mod config;
+mod status;
 
 use clap::Parser;
 use config::{CliRaw, Command, Config, ConfigError};

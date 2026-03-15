@@ -32,6 +32,8 @@ use std::collections::HashSet;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use crate::status;
+
 use ragenix_rekey_lib::{
   decrypt_file, encrypt_to_recipients, parse_recipient_string, IdentityError, IdentitySession,
 };
@@ -165,7 +167,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
       all_outputs.insert(output_path.clone());
 
       if !args.force && output_path.exists() {
-        tracing::info!(host = %hostname, secret = %secret_name, "skipping (already rekeyed)");
+        status::skipped(&format!("{hostname}/{secret_name}"));
         continue;
       }
 
@@ -208,7 +210,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     std::fs::create_dir_all(&item.storage_dir)?;
 
     for (secret_name, secret, output_path) in &item.pending {
-      tracing::info!(host = %item.hostname, secret = %secret_name, "rekeying");
+      tracing::debug!(host = %item.hostname, secret = %secret_name, "rekeying");
 
       let src_path = flake_dir.join(&secret.rekey_file);
 
@@ -232,13 +234,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
 
       write_atomic(output_path, &ciphertext)?;
 
-      tracing::info!(
-        host = %item.hostname,
-        secret = %secret_name,
-        path = %output_path.display(),
-        "rekeyed"
-      );
-
+      status::rekeyed(&format!("{}/{}", item.hostname, secret_name));
       total += 1;
     }
 
