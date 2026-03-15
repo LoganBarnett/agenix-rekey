@@ -159,7 +159,7 @@ let
       defs = contextSecret.defs;
       script = contextSecret.script;
       tags = secret.generator.tags;
-      settings = secret.settings;
+      settings = null;
       dependencies = mapListOrAttrValues (dep: {
         name = dep.id;
         host = findHost dep;
