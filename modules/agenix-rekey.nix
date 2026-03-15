@@ -100,6 +100,43 @@ let
 
   generatorType = types.submodule (submod: {
     options = {
+      settingsModule = mkOption {
+        type = types.nullOr types.deferredModule;
+        default = null;
+        description = ''
+          An optional NixOS module that declares the typed options accepted by
+          this generator's `settings`.  When provided, the value of
+          `age.secrets.<name>.settings` for any secret that uses this generator
+          is evaluated as a submodule against these declarations, giving you:
+
+          - **Type checking** at Nix evaluation time (wrong types are errors).
+          - **Default values** via `lib.mkOption`'s `default` attribute.
+          - **Merging semantics** from the option's `type.merge` function.
+          - **Documentation** rendered alongside all other NixOS options.
+
+          When `settingsModule` is omitted the `settings` option retains its
+          previous free-form `nullOr attrs` type for backward compatibility.
+
+          Example:
+
+          ```nix
+          settingsModule = { lib, ... }: {
+            options = {
+              commonName = lib.mkOption {
+                type = lib.types.str;
+                description = "Certificate common name (CN).";
+              };
+              validityDays = lib.mkOption {
+                type = lib.types.int;
+                default = 365;
+                description = "Validity period in days.";
+              };
+            };
+          };
+          ```
+        '';
+      };
+
       dependencies = mkOption {
         type =
           with types;
@@ -390,18 +427,48 @@ in
               description = "If defined, this generator will be used to bootstrap this secret's when it doesn't exist.";
             };
             settings = mkOption {
-              type = types.nullOr types.attrs;
-              default = null;
-              description = "Settings to provide to a specific secret.";
+              # When the generator declares a settingsModule, use it as the
+              # submodule type so the NixOS module system validates, merges,
+              # and fills in defaults automatically.  When no settingsModule is
+              # declared the type falls back to `nullOr attrs` for backward
+              # compatibility with generators that treat settings as free-form.
+              type =
+                if
+                  submod.config.generator != null
+                  && submod.config.generator.settingsModule != null
+                then
+                  types.submodule submod.config.generator.settingsModule
+                else
+                  types.nullOr types.attrs;
+              default =
+                if
+                  submod.config.generator != null
+                  && submod.config.generator.settingsModule != null
+                then
+                  { }
+                else
+                  null;
+              description = ''
+                Settings for this secret's generator.
+
+                When the generator declares a `settingsModule`, this option is
+                evaluated as a typed submodule — see the generator's option
+                documentation for the available fields, their types, and their
+                defaults.
+
+                When the generator has no `settingsModule`, this option accepts
+                any attribute set (free-form) for backward compatibility.
+
+                The validated settings are passed to the generator script as the
+                `settings` argument and are included in the JSON manifest
+                consumed by the Rust runtime.
+              '';
               example = literalExpression ''
                 {
-                  validity = 365;
+                  validityDays = 365;
                   subject = {
                     country = "Gondor";
-                    state = "";
-                    location = "Minas Tirith";
-                    organization = "Rangers of Ithilien";
-                    organization-unit = "Rangers of Ithilien";
+                    commonName = "minas-tirith.example.com";
                   };
                 }
               '';

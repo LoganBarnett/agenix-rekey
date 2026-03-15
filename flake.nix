@@ -125,9 +125,14 @@
         {
           config,
           pkgs,
+          lib,
           ...
         }:
         {
+          checks.settings-module-tests = import ./tests/settings-module.nix {
+            inherit pkgs lib;
+            nixpkgs = inputs.nixpkgs;
+          };
           devshells.default = {
             packages = [
               config.treefmt.build.wrapper

@@ -79,10 +79,16 @@ let
         file = sourceFile;
         name = secretName;
         decrypt = ageMasterDecrypt;
+        # Pass the secret's own validated settings so generator scripts can
+        # use `{ settings, ... }:` to access them.  When settings is null
+        # (no settingsModule and none provided) we pass an empty attrset so
+        # scripts with a `settings` parameter still destructure cleanly.
+        settings = if secret.settings != null then secret.settings else { };
         deps = flip mapListOrAttrs secret.generator.dependencies (dep: {
           host = findHost dep;
           name = dep.id;
           file = relativeToFlake dep.rekeyFile;
+          settings = if dep.settings != null then dep.settings else { };
         });
       };
     in
