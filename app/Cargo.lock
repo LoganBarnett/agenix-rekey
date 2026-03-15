@@ -947,6 +947,7 @@ dependencies = [
  "ragenix-rekey-lib",
  "serde",
  "serde_json",
+ "sha2",
  "tap",
  "tempfile",
  "thiserror 2.0.18",
@@ -959,6 +960,7 @@ name = "ragenix-rekey-lib"
 version = "0.1.0"
 dependencies = [
  "age",
+ "libc",
  "rpassword",
  "secrecy",
  "serde",

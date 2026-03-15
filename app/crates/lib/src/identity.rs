@@ -132,13 +132,17 @@ impl IdentitySession {
 ///
 /// Tries the following sources in order:
 /// 1. `/dev/tty` — works when the process has a controlling terminal.
-/// 2. The actual terminal device via `ttyname(2)` — works under `nix run` on
-///    macOS, where the process has no controlling terminal (ENXIO on
-///    `/dev/tty`) but stderr is still connected to the user's real terminal
-///    device (e.g. `/dev/ttys004`).  Opening the device directly with O_RDWR
-///    bypasses the controlling-terminal requirement while still supporting
-///    `tcsetattr` for echo suppression.
-/// 3. `stdin` — last resort; echo cannot be suppressed if stdin is a pipe.
+/// 2. The actual terminal device via `ttyname(2)` on file descriptors 2
+///    (stderr) and 1 (stdout) — works when `/dev/tty` returns ENXIO but
+///    one of those fds is still a real terminal device (e.g. `/dev/ttys004`).
+///    Opening the device path directly with O_RDWR bypasses the
+///    controlling-terminal requirement while still supporting `tcsetattr`.
+/// 3. `$SSH_ASKPASS` — if set, runs the named program with the prompt string
+///    as its sole argument and reads the passphrase from its stdout.  This is
+///    the canonical solution for tools launched by `nix run` or other
+///    launchers that pipe stdout/stderr rather than connecting them to the
+///    terminal (making all the tty approaches above fail).
+/// 4. `stdin` — last resort.
 fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
   match rpassword::prompt_password(prompt.as_ref()) {
     Ok(p) => return Ok(p),
@@ -146,15 +150,13 @@ fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
     _ => {} // ENXIO — no controlling terminal; try alternatives below
   }
 
-  // /dev/tty failed. Find the actual terminal device that stderr is connected
-  // to (e.g. /dev/ttys004 on macOS) and open it directly with O_RDWR.
-  // This works because opening the terminal device path directly does not
-  // require a controlling terminal, but does support tcsetattr for echo control.
+  // Try to find and open the real terminal device via ttyname(2).
   #[cfg(unix)]
-  if let Some(tty_path) = terminal_path_from_fd(2).or_else(|| terminal_path_from_fd(1)) {
+  if let Some(tty_path) =
+    terminal_path_from_fd(2).or_else(|| terminal_path_from_fd(1))
+  {
     if let Ok(tty) = std::fs::OpenOptions::new().read(true).write(true).open(&tty_path) {
       use std::io::Write;
-      // Write prompt to the terminal device itself (stdout/stderr may be pipes).
       if let Ok(mut w) = tty.try_clone() {
         let _ = write!(w, "{}", prompt.as_ref());
       }
@@ -162,7 +164,26 @@ fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
     }
   }
 
+  // SSH_ASKPASS: standard mechanism for terminal-less passphrase entry.
+  // Commonly set by graphical session managers or by the user for tools like
+  // nix run that pipe stdout/stderr and leave no usable tty fd.
+  if let Ok(askpass) = std::env::var("SSH_ASKPASS") {
+    if !askpass.is_empty() {
+      eprintln!(
+        "[ragenix-rekey] no terminal available; using SSH_ASKPASS ({})",
+        askpass
+      );
+      let out = std::process::Command::new(&askpass)
+        .arg(prompt.as_ref())
+        .stdin(std::process::Stdio::null())
+        .output()?;
+      let pass = String::from_utf8_lossy(&out.stdout);
+      return Ok(pass.trim_end_matches('\n').to_string());
+    }
+  }
+
   // Final fallback: print prompt to stderr and read from stdin.
+  // Useful when the caller pipes a passphrase for automation.
   eprint!("{}", prompt.as_ref());
   rpassword::read_password_from_bufread(&mut std::io::stdin().lock())
 }
@@ -175,8 +196,8 @@ fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
 #[cfg(unix)]
 fn terminal_path_from_fd(fd: i32) -> Option<String> {
   use std::ffi::CStr;
-  // Safety: ttyname(3) returns a pointer to a static string that is valid
-  // until the next call.  We copy it immediately into a String.
+  // Safety: ttyname(3) returns a pointer to a static string valid until the
+  // next call.  We copy it immediately into an owned String.
   let ptr = unsafe { libc::ttyname(fd) };
   if ptr.is_null() {
     return None;
