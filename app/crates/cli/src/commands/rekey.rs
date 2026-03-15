@@ -216,7 +216,14 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     for (secret_name, secret, output_path) in &item.pending {
       tracing::debug!(host = %item.hostname, secret = %secret_name, "rekeying");
 
-      let src_path = flake_dir.join(&secret.rekey_file);
+      // Prefer the CWD copy of the source file so that secrets freshly
+      // generated in the same workflow (not yet committed to git, and
+      // therefore absent from the read-only flake_dir store path) can be
+      // rekeyed immediately without requiring a git commit + flake rebuild.
+      let src_path = {
+        let cwd_path = cwd.join(&secret.rekey_file);
+        if cwd_path.exists() { cwd_path } else { flake_dir.join(&secret.rekey_file) }
+      };
 
       let plaintext = if args.dummy {
         DUMMY_PLAINTEXT.to_vec()

@@ -176,7 +176,14 @@ let
   makeHostConfig =
     hostname: node:
     let
-      hostSecrets = filterAttrs (_: s: s.rekeyFile != null) node.config.age.secrets;
+      # Only include secrets whose rekeyFile already exists on disk.
+      # builtins.hashFile (used below for identHash) fails at eval time if the
+      # file is absent, which would prevent the manifest from being built at all
+      # for brand-new generated secrets whose rekeyFile has not yet been created.
+      # Filtering here lets `generate` run successfully to create the file; the
+      # secret will appear here (and be rekeyed) once the file is committed to
+      # git and the flake is re-evaluated.
+      hostSecrets = filterAttrs (_: s: s.rekeyFile != null && builtins.pathExists s.rekeyFile) node.config.age.secrets;
       # Use the raw pubkey (not removeSuffix "\n") to match the bash rekey formula.
       pubkeyHash = builtins.hashString "sha256" node.config.age.rekey.hostPubkey;
     in
