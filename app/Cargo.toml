@@ -53,5 +53,8 @@ sha2 = "0.10"
 # POSIX system calls (ttyname, isatty — for passphrase terminal detection)
 libc = "0.2"
 
+# Terminal colors
+owo-colors = { version = "4", features = ["supports-colors"] }
+
 # Shared library
 ragenix-rekey-lib = { path = "crates/lib" }
