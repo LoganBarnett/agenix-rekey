@@ -159,6 +159,13 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     secrets.sort_by_key(|(name, _)| name.as_str());
 
     for (secret_name, secret) in secrets {
+      // Intermediary secrets exist only as generator dependencies and are
+      // never deployed to hosts.  Skip them entirely — any previously-rekeyed
+      // file will be removed by the orphan sweep below.
+      if secret.intermediary {
+        continue;
+      }
+
       let output_path = storage_dir.join(format!("{}-{}.age", secret.ident_hash, secret_name));
 
       all_outputs.insert(output_path.clone());
