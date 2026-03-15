@@ -14,4 +14,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tap = { workspace = true }
 age = { workspace = true }
+rpassword = { workspace = true }
+secrecy = { workspace = true }
 

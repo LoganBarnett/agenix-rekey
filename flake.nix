@@ -30,6 +30,7 @@
       allApps = [
         "edit-view"
         "generate"
+        "manifest"
         "rekey"
         "update-masterkeys"
       ];

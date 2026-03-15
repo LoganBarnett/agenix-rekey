@@ -14,10 +14,24 @@ pub enum ConfigError {
 pub enum Command {
   /// Generate secrets using their configured generators.
   Generate {
-    /// Only generate secrets matching these file paths or tags.
-    /// If omitted, all secrets with generators are considered.
-    #[arg(value_name = "PATH_OR_TAG")]
+    /// Limit generation to secrets at these paths (relative to flake root).
+    /// If omitted along with --tags, all secrets with generators are processed.
+    #[arg(value_name = "PATH")]
     filter: Vec<String>,
+
+    /// Force re-generation even when the output file already exists and all
+    /// dependencies are unchanged.
+    #[arg(short, long)]
+    force: bool,
+
+    /// Stage generated (and removed orphan) files with `git add`.
+    #[arg(short = 'a', long = "add-to-git")]
+    add_to_git: bool,
+
+    /// Also select secrets whose tags overlap this comma-separated list.
+    /// May be specified multiple times.
+    #[arg(short, long, value_name = "TAGS")]
+    tags: Vec<String>,
   },
 
   /// Re-encrypt master-encrypted secrets for each host's public key.

@@ -19,8 +19,7 @@
 # time, so the secret value is visible in your Nix configuration.  This
 # generator is intentionally simple; for real secrets use a generator that
 # produces random output.
-_:
-{
+_: {
   settingsModule =
     { lib, ... }:
     {

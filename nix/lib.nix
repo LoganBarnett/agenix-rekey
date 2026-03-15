@@ -186,6 +186,8 @@ in
   inherit relativeToFlake;
   inherit validRelativeSecretPaths;
   inherit mergedSecrets;
+  inherit mergedMasterIdentities;
+  inherit mergedExtraEncryptionPubkeys;
 
   # Premade shell commands to encrypt and decrypt secrets.
   # NOTE: In order to keep compatibility with existing generator setups,

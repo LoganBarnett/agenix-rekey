@@ -36,5 +36,16 @@ thiserror = "2.0"
 # age encryption
 age = { version = "0.11", features = ["armor"] }
 
+# Passphrase prompting (used when loading passphrase-protected identity files)
+rpassword = "7"
+
+# Secret string wrapper – keeps passphrases out of debug output and prevents
+# accidental logging.  Re-exported by the age crate but we depend on it
+# directly so the type is available without going through age.
+secrecy = "0.10"
+
+# Temporary directories for dep decryption staging
+tempfile = "3"
+
 # Shared library
 ragenix-rekey-lib = { path = "crates/lib" }
