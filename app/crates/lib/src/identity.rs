@@ -144,10 +144,20 @@ impl IdentitySession {
 ///    terminal (making all the tty approaches above fail).
 /// 4. `stdin` — last resort.
 fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
+  use std::io::ErrorKind;
   match rpassword::prompt_password(prompt.as_ref()) {
     Ok(p) => return Ok(p),
-    Err(e) if e.raw_os_error() != Some(6) => return Err(e),
-    _ => {} // ENXIO — no controlling terminal; try alternatives below
+    // ENXIO (errno 6): open of /dev/tty failed — no controlling terminal.
+    // UnexpectedEof: /dev/tty opened but read returned EOF (e.g. nix run,
+    //   CI environments, or sub-processes where stdin/tty is disconnected).
+    // Both indicate no interactive terminal is available; try alternatives.
+    Err(e)
+      if e.raw_os_error() == Some(6)
+        || e.kind() == ErrorKind::UnexpectedEof =>
+    {
+      // fall through to alternatives below
+    }
+    Err(e) => return Err(e),
   }
 
   // Try to find and open the real terminal device via ttyname(2).
