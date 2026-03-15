@@ -128,21 +128,39 @@ impl IdentitySession {
 
 // ── Passphrase reading ────────────────────────────────────────────────────────
 
-/// Read a passphrase, preferring `/dev/tty` so stdin redirection doesn't
-/// interfere.  Falls back to stdin if `/dev/tty` is unavailable (e.g. when
-/// launched by `nix run` on macOS which may have no controlling terminal).
+/// Read a passphrase with terminal echo suppressed.
+///
+/// Tries the following sources in order:
+/// 1. `/dev/tty` — works when the process has a controlling terminal.
+/// 2. `/dev/fd/2` / `/dev/stderr` — works under `nix run` on macOS, where
+///    the process has no controlling terminal but stderr is still connected to
+///    the user's real terminal device.  Opening the terminal via its raw path
+///    bypasses the controlling-terminal requirement and allows `tcsetattr` to
+///    suppress echo normally.
+/// 3. `stdin` — last resort; echo cannot be suppressed but the user can still
+///    type (or pipe) the passphrase.
 fn read_passphrase(prompt: impl AsRef<str>) -> Result<String, std::io::Error> {
   match rpassword::prompt_password(prompt.as_ref()) {
-    Ok(p) => Ok(p),
-    // ENXIO (6) = no controlling terminal; ENODEV also maps here on some OS.
-    // In that case fall back to reading from stdin (user may have the TTY on
-    // stdin, or may pipe the passphrase for automation).
-    Err(e) if e.raw_os_error() == Some(6) => {
-      eprint!("{}", prompt.as_ref());
-      rpassword::read_password_from_bufread(&mut std::io::stdin().lock())
-    }
-    Err(e) => Err(e),
+    Ok(p) => return Ok(p),
+    Err(e) if e.raw_os_error() != Some(6) => return Err(e),
+    _ => {} // ENXIO — no controlling terminal; try alternatives below
   }
+
+  // Print the prompt to stderr so the user sees it regardless of how we read.
+  eprint!("{}", prompt.as_ref());
+
+  // Try to open a read handle to the terminal via the stderr file descriptor.
+  // /dev/fd/2 and /dev/stderr are both paths to fd 2 on macOS and Linux; when
+  // stderr is a terminal they provide a readable handle that supports tcsetattr,
+  // allowing rpassword to suppress echo even without a controlling terminal.
+  for tty_path in &["/dev/fd/2", "/dev/stderr"] {
+    if let Ok(tty) = std::fs::File::open(tty_path) {
+      return rpassword::read_password_from_bufread(&mut std::io::BufReader::new(tty));
+    }
+  }
+
+  // Final fallback: stdin (may be a pipe/redirected; echo suppression may fail).
+  rpassword::read_password_from_bufread(&mut std::io::stdin().lock())
 }
 
 // ── Identity file loading ─────────────────────────────────────────────────────
