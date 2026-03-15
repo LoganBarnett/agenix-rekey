@@ -153,6 +153,18 @@ pub struct HostSecret {
   /// Relative path to the master-encrypted `.age` file.
   pub rekey_file: String,
 
+  /// Output filename prefix computed by Nix eval using the same formula as
+  /// the bash rekey script:
+  ///
+  /// ```text
+  /// sha256( sha256(pubkey) + hashFile(rekeyFile) )[..32]
+  /// ```
+  ///
+  /// Storing it in the manifest ensures Nix and Rust always agree on the
+  /// output path (avoids divergence from e.g. trailing newlines in pubkeys
+  /// read via `builtins.readFile`).
+  pub ident_hash: String,
+
   /// When true this secret is only used as an intermediary and should not
   /// be deployed to the host (a dummy secret is used in its place).
   #[serde(default)]

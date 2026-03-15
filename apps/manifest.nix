@@ -177,6 +177,8 @@ let
     hostname: node:
     let
       hostSecrets = filterAttrs (_: s: s.rekeyFile != null) node.config.age.secrets;
+      # Use the raw pubkey (not removeSuffix "\n") to match the bash rekey formula.
+      pubkeyHash = builtins.hashString "sha256" node.config.age.rekey.hostPubkey;
     in
     {
       pubkey = removeSuffix "\n" node.config.age.rekey.hostPubkey;
@@ -191,6 +193,12 @@ let
           null;
       secrets = mapAttrs (secretName: secret: {
         rekeyFile = relativeToFlake secret.rekeyFile;
+        # Compute the ident hash using the same formula as the bash rekey script
+        # so the Rust runtime resolves the same output filename every time.
+        # Formula: sha256(sha256(pubkey) + hashFile(rekeyFile))[..32]
+        identHash = builtins.substring 0 32 (
+          builtins.hashString "sha256" (pubkeyHash + builtins.hashFile "sha256" secret.rekeyFile)
+        );
         intermediary = secret.intermediary or false;
       }) hostSecrets;
     };

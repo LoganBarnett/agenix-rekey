@@ -38,7 +38,6 @@ use ragenix_rekey_lib::{
   decrypt_file, encrypt_to_recipients, parse_recipient_string, IdentityError, IdentitySession,
 };
 use ragenix_rekey_lib::manifest::{HostConfig, HostSecret, Manifest, StorageMode};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -160,9 +159,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     secrets.sort_by_key(|(name, _)| name.as_str());
 
     for (secret_name, secret) in secrets {
-      let src_path = flake_dir.join(&secret.rekey_file);
-      let ident_hash = ident_hash(&host.pubkey, &src_path)?;
-      let output_path = storage_dir.join(format!("{}-{}.age", ident_hash, secret_name));
+      let output_path = storage_dir.join(format!("{}-{}.age", secret.ident_hash, secret_name));
 
       all_outputs.insert(output_path.clone());
 
@@ -258,30 +255,6 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
 
   tracing::info!(rekeyed = total, "rekey complete");
   Ok(())
-}
-
-// ── Identity hash ─────────────────────────────────────────────────────────────
-
-/// Compute the identity hash used as the output filename prefix.
-///
-/// Formula (matches the bash/Nix implementation):
-/// ```text
-/// identHash = sha256(sha256(pubkey) + sha256(file_contents))[..32]
-/// ```
-/// where both inner hashes are lowercase hex strings.
-fn ident_hash(pubkey: &str, src_path: &Path) -> Result<String, std::io::Error> {
-  let pubkey_hash = hex_sha256(pubkey.as_bytes());
-  let file_contents = std::fs::read(src_path)?;
-  let file_hash = hex_sha256(&file_contents);
-  let combined = pubkey_hash + &file_hash;
-  let result = hex_sha256(combined.as_bytes());
-  Ok(result[..32].to_string())
-}
-
-fn hex_sha256(data: &[u8]) -> String {
-  let mut h = Sha256::new();
-  h.update(data);
-  format!("{:x}", h.finalize())
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
