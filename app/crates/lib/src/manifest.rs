@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+// Tests are at the bottom of this file.
+
 // ── Top-level ────────────────────────────────────────────────────────────────
 
 /// The complete manifest produced by `nix eval` and consumed by every
@@ -169,4 +171,184 @@ pub struct HostSecret {
   /// be deployed to the host (a dummy secret is used in its place).
   #[serde(default)]
   pub intermediary: bool,
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  // ── StorageMode ─────────────────────────────────────────────────────────────
+
+  #[test]
+  fn storage_mode_deserialises_local() {
+    let m: StorageMode = serde_json::from_str("\"local\"").unwrap();
+    assert!(matches!(m, StorageMode::Local));
+  }
+
+  #[test]
+  fn storage_mode_deserialises_derivation() {
+    let m: StorageMode = serde_json::from_str("\"derivation\"").unwrap();
+    assert!(matches!(m, StorageMode::Derivation));
+  }
+
+  #[test]
+  fn storage_mode_round_trips() {
+    for mode in [StorageMode::Local, StorageMode::Derivation] {
+      let json = serde_json::to_string(&mode).unwrap();
+      let back: StorageMode = serde_json::from_str(&json).unwrap();
+      assert_eq!(
+        serde_json::to_string(&back).unwrap(),
+        json,
+        "StorageMode round-trip failed for {json}"
+      );
+    }
+  }
+
+  // ── HostSecret ──────────────────────────────────────────────────────────────
+
+  #[test]
+  fn host_secret_deserialises_required_fields() {
+    let json = r#"{
+      "rekeyFile": "./secrets/foo.age",
+      "identHash": "abc123def456789012345678901234ab"
+    }"#;
+    let s: HostSecret = serde_json::from_str(json).unwrap();
+    assert_eq!(s.rekey_file, "./secrets/foo.age");
+    assert_eq!(s.ident_hash, "abc123def456789012345678901234ab");
+    assert!(!s.intermediary, "intermediary should default to false");
+  }
+
+  #[test]
+  fn host_secret_deserialises_intermediary_true() {
+    let json = r#"{
+      "rekeyFile": "./secrets/ca.age",
+      "identHash": "deadbeef00000000000000000000abcd",
+      "intermediary": true
+    }"#;
+    let s: HostSecret = serde_json::from_str(json).unwrap();
+    assert!(s.intermediary);
+  }
+
+  // ── HostConfig ──────────────────────────────────────────────────────────────
+
+  #[test]
+  fn host_config_with_local_storage() {
+    let json = r#"{
+      "pubkey": "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p",
+      "storageMode": "local",
+      "localStorageDir": "./secrets/rekeyed/myhost",
+      "secrets": {
+        "myapp": {
+          "rekeyFile": "./secrets/myapp.age",
+          "identHash": "1234567890abcdef1234567890abcdef"
+        }
+      }
+    }"#;
+    let h: HostConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(h.local_storage_dir.as_deref(), Some("./secrets/rekeyed/myhost"));
+    assert!(matches!(h.storage_mode, StorageMode::Local));
+    assert!(h.secrets.contains_key("myapp"));
+  }
+
+  #[test]
+  fn host_config_null_local_storage_dir() {
+    let json = r#"{
+      "pubkey": "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p",
+      "storageMode": "derivation",
+      "localStorageDir": null,
+      "secrets": {}
+    }"#;
+    let h: HostConfig = serde_json::from_str(json).unwrap();
+    assert!(h.local_storage_dir.is_none());
+    assert!(matches!(h.storage_mode, StorageMode::Derivation));
+  }
+
+  // ── GenerateEntry ────────────────────────────────────────────────────────────
+
+  #[test]
+  fn generate_entry_defaults_for_optional_fields() {
+    let json = r#"{
+      "path": "./secrets/gen.age",
+      "defs": ["host1:mysecret"],
+      "script": "echo hello",
+      "tags": [],
+      "settings": null
+    }"#;
+    let e: GenerateEntry = serde_json::from_str(json).unwrap();
+    assert_eq!(e.path, "./secrets/gen.age");
+    assert!(e.dependencies.is_empty(), "dependencies should default to empty");
+  }
+
+  #[test]
+  fn generate_entry_with_dependency() {
+    let json = r#"{
+      "path": "./secrets/leaf.age",
+      "defs": ["host1:leaf"],
+      "script": "sign",
+      "tags": ["tls"],
+      "settings": null,
+      "dependencies": [
+        {"name": "ca", "host": "host1", "path": "./secrets/ca.age"}
+      ]
+    }"#;
+    let e: GenerateEntry = serde_json::from_str(json).unwrap();
+    assert_eq!(e.dependencies.len(), 1);
+    assert_eq!(e.dependencies[0].name, "ca");
+    assert_eq!(e.dependencies[0].host, "host1");
+    assert_eq!(e.dependencies[0].path, "./secrets/ca.age");
+  }
+
+  // ── Full Manifest ────────────────────────────────────────────────────────────
+
+  #[test]
+  fn full_manifest_round_trip() {
+    let json = r#"{
+      "flakeDir": "/nix/store/abc-source",
+      "masterIdentities": [
+        {"identity": "/path/to/key.txt", "pubkey": "age1abc"},
+        {"identity": "/path/to/encrypted.age", "pubkey": null}
+      ],
+      "extraEncryptionPubkeys": ["age1extra"],
+      "generate": [],
+      "hosts": {
+        "server": {
+          "pubkey": "age1server",
+          "storageMode": "local",
+          "localStorageDir": "./secrets/rekeyed/server",
+          "secrets": {
+            "db-pass": {
+              "rekeyFile": "./secrets/db-pass.age",
+              "identHash": "ffffffffffffffffffffffffffffffff",
+              "intermediary": false
+            }
+          }
+        }
+      }
+    }"#;
+
+    let m: Manifest = serde_json::from_str(json).unwrap();
+    assert_eq!(m.master_identities.len(), 2);
+    assert_eq!(m.master_identities[0].pubkey.as_deref(), Some("age1abc"));
+    assert!(m.master_identities[1].pubkey.is_none());
+    assert_eq!(m.extra_encryption_pubkeys, vec!["age1extra"]);
+    assert!(m.generate.is_empty());
+    assert!(m.hosts.contains_key("server"));
+    let server = &m.hosts["server"];
+    assert_eq!(server.secrets["db-pass"].ident_hash, "ffffffffffffffffffffffffffffffff");
+  }
+
+  #[test]
+  fn manifest_extra_encryption_pubkeys_defaults_to_empty() {
+    // The field is optional in the JSON (marked #[serde(default)]).
+    let json = r#"{
+      "flakeDir": "/nix/store/abc",
+      "masterIdentities": [],
+      "generate": [],
+      "hosts": {}
+    }"#;
+    let m: Manifest = serde_json::from_str(json).unwrap();
+    assert!(m.extra_encryption_pubkeys.is_empty());
+  }
 }

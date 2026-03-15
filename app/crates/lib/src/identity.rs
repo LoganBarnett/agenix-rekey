@@ -425,6 +425,74 @@ fn parse_first_recipient_from_file(
   })
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  // ── scan_pubkey_lines ────────────────────────────────────────────────────────
+
+  #[test]
+  fn scan_pubkey_finds_standard_comment() {
+    let content = "# created: 2024-01-01T00:00:00Z\n\
+                   # public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p\n\
+                   AGE-SECRET-KEY-1QJMXVFQ...\n";
+    assert_eq!(
+      scan_pubkey_lines(content),
+      Some("age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string())
+    );
+  }
+
+  #[test]
+  fn scan_pubkey_finds_recipient_comment() {
+    let content = "# Recipient: age1yubikey1qwpkryjfhspxg6a3rnzwkm8fsn3ek4y4e\n\
+                   AGE-SECRET-KEY-1...\n";
+    assert_eq!(
+      scan_pubkey_lines(content),
+      Some("age1yubikey1qwpkryjfhspxg6a3rnzwkm8fsn3ek4y4e".to_string())
+    );
+  }
+
+  #[test]
+  fn scan_pubkey_ignores_non_age_public_key() {
+    // SSH key in a public-key comment should not be returned.
+    let content = "# public key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA\n\
+                   AGE-SECRET-KEY-1...\n";
+    assert_eq!(scan_pubkey_lines(content), None);
+  }
+
+  #[test]
+  fn scan_pubkey_returns_none_when_absent() {
+    let content = "# created: 2024-01-01T00:00:00Z\nAGE-SECRET-KEY-1...\n";
+    assert_eq!(scan_pubkey_lines(content), None);
+  }
+
+  #[test]
+  fn scan_pubkey_returns_none_for_empty_string() {
+    assert_eq!(scan_pubkey_lines(""), None);
+  }
+
+  #[test]
+  fn scan_pubkey_trims_trailing_whitespace_from_key() {
+    // The prefix must match exactly; trailing whitespace after the key is trimmed.
+    let content = "# public key: age1abcdef   \n";
+    assert_eq!(scan_pubkey_lines(content), Some("age1abcdef".to_string()));
+  }
+
+  #[test]
+  fn scan_pubkey_returns_first_match() {
+    let content = "# public key: age1first\n# public key: age1second\n";
+    assert_eq!(scan_pubkey_lines(content), Some("age1first".to_string()));
+  }
+
+  #[test]
+  fn scan_pubkey_handles_windows_line_endings() {
+    let content = "# public key: age1crlf\r\nAGE-SECRET-KEY-1...\r\n";
+    assert_eq!(scan_pubkey_lines(content), Some("age1crlf".to_string()));
+  }
+}
+
 // ── Cryptographic helpers ─────────────────────────────────────────────────────
 
 /// Decrypt an age-encrypted file using the provided identities.

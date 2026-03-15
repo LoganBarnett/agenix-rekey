@@ -380,3 +380,218 @@ fn set_mode_600(path: &Path) -> Result<(), std::io::Error> {
 fn set_mode_600(_path: &Path) -> Result<(), std::io::Error> {
   Ok(())
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use ragenix_rekey_lib::manifest::DependencyEntry;
+  use std::fs::FileTimes;
+  use std::time::{Duration, SystemTime};
+  use tempfile::tempdir;
+
+  fn make_entry(path: &str, tags: &[&str]) -> GenerateEntry {
+    GenerateEntry {
+      path: path.to_string(),
+      defs: vec![],
+      script: String::new(),
+      tags: tags.iter().map(|s| s.to_string()).collect(),
+      settings: serde_json::Value::Null,
+      dependencies: vec![],
+    }
+  }
+
+  fn make_entry_with_dep(path: &str, dep_path: &str) -> GenerateEntry {
+    GenerateEntry {
+      path: path.to_string(),
+      defs: vec![],
+      script: String::new(),
+      tags: vec![],
+      settings: serde_json::Value::Null,
+      dependencies: vec![DependencyEntry {
+        name: "dep".to_string(),
+        host: "host1".to_string(),
+        path: dep_path.to_string(),
+      }],
+    }
+  }
+
+  fn set_mtime(path: &Path, secs_since_epoch: u64) {
+    let t = SystemTime::UNIX_EPOCH + Duration::from_secs(secs_since_epoch);
+    let times = FileTimes::new().set_modified(t);
+    std::fs::OpenOptions::new()
+      .write(true)
+      .open(path)
+      .unwrap()
+      .set_times(times)
+      .unwrap();
+  }
+
+  // ── wants_entry ─────────────────────────────────────────────────────────────
+
+  #[test]
+  fn wants_entry_no_filter_matches_all() {
+    let e = make_entry("./secrets/foo.age", &["tls"]);
+    assert!(wants_entry(&e, &[], &[]));
+  }
+
+  #[test]
+  fn wants_entry_path_filter_exact_match() {
+    let e = make_entry("./secrets/foo.age", &[]);
+    assert!(wants_entry(&e, &["./secrets/foo.age".to_string()], &[]));
+  }
+
+  #[test]
+  fn wants_entry_path_filter_no_match() {
+    let e = make_entry("./secrets/foo.age", &[]);
+    assert!(!wants_entry(&e, &["./secrets/bar.age".to_string()], &[]));
+  }
+
+  #[test]
+  fn wants_entry_tag_filter_single_match() {
+    let e = make_entry("./secrets/cert.age", &["tls", "infra"]);
+    assert!(wants_entry(&e, &[], &["tls".to_string()]));
+  }
+
+  #[test]
+  fn wants_entry_tag_filter_comma_separated_one_matches() {
+    let e = make_entry("./secrets/cert.age", &["tls"]);
+    assert!(wants_entry(&e, &[], &["other,tls,infra".to_string()]));
+  }
+
+  #[test]
+  fn wants_entry_tag_filter_no_match() {
+    let e = make_entry("./secrets/cert.age", &["tls"]);
+    assert!(!wants_entry(&e, &[], &["infra".to_string()]));
+  }
+
+  #[test]
+  fn wants_entry_path_filter_wins_when_tag_misses() {
+    let e = make_entry("./secrets/foo.age", &["tls"]);
+    assert!(wants_entry(
+      &e,
+      &["./secrets/foo.age".to_string()],
+      &["infra".to_string()]
+    ));
+  }
+
+  #[test]
+  fn wants_entry_neither_filter_nor_tag_matches() {
+    let e = make_entry("./secrets/foo.age", &["tls"]);
+    assert!(!wants_entry(
+      &e,
+      &["./secrets/bar.age".to_string()],
+      &["infra".to_string()]
+    ));
+  }
+
+  // ── deps_are_newer ──────────────────────────────────────────────────────────
+
+  #[test]
+  fn deps_are_newer_output_missing_returns_true() {
+    let dir = tempdir().unwrap();
+    let output = dir.path().join("output.age");
+    // output does not exist
+    let entry = make_entry("output.age", &[]);
+    assert!(deps_are_newer(&entry, &output, dir.path()));
+  }
+
+  #[test]
+  fn deps_are_newer_no_deps_returns_false() {
+    let dir = tempdir().unwrap();
+    let output = dir.path().join("output.age");
+    std::fs::write(&output, b"data").unwrap();
+    set_mtime(&output, 2000);
+
+    let entry = make_entry("output.age", &[]);
+    assert!(!deps_are_newer(&entry, &output, dir.path()));
+  }
+
+  #[test]
+  fn deps_are_newer_dep_older_returns_false() {
+    let dir = tempdir().unwrap();
+    let dep = dir.path().join("dep.age");
+    let output = dir.path().join("output.age");
+
+    std::fs::write(&dep, b"dep").unwrap();
+    std::fs::write(&output, b"out").unwrap();
+
+    set_mtime(&dep, 1000);
+    set_mtime(&output, 2000); // output newer than dep
+
+    let entry = make_entry_with_dep("output.age", "dep.age");
+    assert!(!deps_are_newer(&entry, &output, dir.path()));
+  }
+
+  #[test]
+  fn deps_are_newer_dep_newer_returns_true() {
+    let dir = tempdir().unwrap();
+    let dep = dir.path().join("dep.age");
+    let output = dir.path().join("output.age");
+
+    std::fs::write(&dep, b"dep").unwrap();
+    std::fs::write(&output, b"out").unwrap();
+
+    set_mtime(&output, 1000);
+    set_mtime(&dep, 2000); // dep newer than output
+
+    let entry = make_entry_with_dep("output.age", "dep.age");
+    assert!(deps_are_newer(&entry, &output, dir.path()));
+  }
+
+  #[test]
+  fn deps_are_newer_missing_dep_file_is_ignored() {
+    // A dep that doesn't exist on disk is silently skipped — the output
+    // is not considered stale on account of a missing dep.
+    let dir = tempdir().unwrap();
+    let output = dir.path().join("output.age");
+    std::fs::write(&output, b"out").unwrap();
+    set_mtime(&output, 2000);
+
+    let entry = make_entry_with_dep("output.age", "ghost.age"); // ghost.age doesn't exist
+    assert!(!deps_are_newer(&entry, &output, dir.path()));
+  }
+
+  // ── shell_single_quote ───────────────────────────────────────────────────────
+
+  #[test]
+  fn shell_quote_simple_string() {
+    assert_eq!(shell_single_quote("hello"), "'hello'");
+  }
+
+  #[test]
+  fn shell_quote_empty_string() {
+    assert_eq!(shell_single_quote(""), "''");
+  }
+
+  #[test]
+  fn shell_quote_string_with_spaces() {
+    assert_eq!(shell_single_quote("hello world"), "'hello world'");
+  }
+
+  #[test]
+  fn shell_quote_string_with_single_quote() {
+    // it's  →  'it'\''s'
+    assert_eq!(shell_single_quote("it's"), r"'it'\''s'");
+  }
+
+  #[test]
+  fn shell_quote_string_with_special_chars() {
+    assert_eq!(shell_single_quote("$HOME/foo"), "'$HOME/foo'");
+  }
+
+  #[test]
+  fn shell_quote_path_with_single_quote_in_dirname() {
+    // /tmp/bob's dir/file  →  '/tmp/bob'\''s dir/file'
+    assert_eq!(
+      shell_single_quote("/tmp/bob's dir/file"),
+      r"'/tmp/bob'\''s dir/file'"
+    );
+  }
+
+  #[test]
+  fn shell_quote_multiple_single_quotes() {
+    assert_eq!(shell_single_quote("a'b'c"), r"'a'\''b'\''c'");
+  }
+}
