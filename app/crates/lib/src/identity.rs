@@ -84,7 +84,7 @@ impl IdentitySession {
       let path = &mi.identity;
       let is_passphrase_protected = path.extension().map_or(false, |e| e == "age");
 
-      let loaded_ids = if is_passphrase_protected {
+      let (loaded_ids, implicit_pubkey) = if is_passphrase_protected {
         if no_prompt {
           return Err(IdentityError::PassphraseRequired {
             path: path.to_string_lossy().into_owned(),
@@ -92,29 +92,35 @@ impl IdentitySession {
         }
         load_passphrase_identity_file(path)?
       } else {
-        load_plain_identity_file(path)?
+        (load_plain_identity_file(path)?, None)
       };
 
       identities.extend(loaded_ids);
 
       // Collect the recipient for this identity (for encryption).
+      // Priority: explicit pubkey > pubkey extracted from identity content.
       if let Some(ref pubkey) = mi.pubkey {
         let recipient = parse_recipient_string(pubkey)?;
         recipients.push(recipient);
-      } else if is_passphrase_protected {
-        // Passphrase-protected identity files are binary age ciphertexts;
-        // read_to_string would fail with "invalid UTF-8".  If no explicit
-        // pubkey was given, skip rather than error — set `pubkey` in
-        // masterIdentities to enable encryption with this identity.
-      } else if let Some(pubkey) = extract_pubkey_comment(path)? {
-        match parse_recipient_string(&pubkey) {
-          Ok(r) => recipients.push(r),
-          Err(e) => tracing::debug!(
-            path = %path.display(),
-            %pubkey,
-            error = %e,
-            "found public key comment but could not parse as recipient"
-          ),
+      } else {
+        // For passphrase-protected files: `implicit_pubkey` comes from scanning
+        // the decrypted inner content.  For plain files: scan the file itself.
+        // Never call extract_pubkey_comment on a binary .age file.
+        let found = if is_passphrase_protected {
+          implicit_pubkey
+        } else {
+          extract_pubkey_comment(path)?
+        };
+        if let Some(pubkey) = found {
+          match parse_recipient_string(&pubkey) {
+            Ok(r) => recipients.push(r),
+            Err(e) => tracing::debug!(
+              path = %path.display(),
+              %pubkey,
+              error = %e,
+              "found public key comment but could not parse as recipient"
+            ),
+          }
         }
       }
     }
@@ -245,9 +251,14 @@ fn load_plain_identity_file(
 /// The file is an age-encrypted container whose plaintext is itself an age
 /// identity file.  We decrypt with the user-supplied passphrase (scrypt),
 /// then parse the inner bytes as a plain identity file.
+///
+/// Returns `(identities, pubkey)`.  `pubkey` is `Some` when the decrypted
+/// identity text contains a `# public key: age1...` comment; `None` otherwise.
+/// The caller uses this to register a recipient without requiring an explicit
+/// `pubkey` field in the manifest.
 fn load_passphrase_identity_file(
   path: &Path,
-) -> Result<Vec<Box<dyn age::Identity>>, IdentityError> {
+) -> Result<(Vec<Box<dyn age::Identity>>, Option<String>), IdentityError> {
   let path_str = path.to_string_lossy().into_owned();
 
   let file = std::fs::File::open(path).map_err(|e| IdentityError::Io {
@@ -294,8 +305,15 @@ fn load_passphrase_identity_file(
     source: e,
   })?;
 
+  // Scan the decrypted text for a pubkey comment before consuming the bytes.
+  // The decrypted content is UTF-8 identity text; lossy conversion is safe here
+  // since we're just scanning comment lines.
+  let implicit_pubkey = std::str::from_utf8(&decrypted)
+    .ok()
+    .and_then(scan_pubkey_lines);
+
   // Parse the decrypted identity text.
-  age::IdentityFile::from_buffer(Cursor::new(decrypted))
+  let identities = age::IdentityFile::from_buffer(Cursor::new(decrypted))
     .map_err(|e| IdentityError::Io {
       path: path_str.clone(),
       source: e,
@@ -304,10 +322,37 @@ fn load_passphrase_identity_file(
     .map_err(|e| IdentityError::AgeParse {
       path: path_str,
       message: e.to_string(),
-    })
+    })?;
+
+  Ok((identities, implicit_pubkey))
 }
 
 // ── Pubkey extraction ─────────────────────────────────────────────────────────
+
+/// Scan identity file text for a `# public key: age1...` or `# Recipient: age1...` comment.
+fn scan_pubkey_lines(content: &str) -> Option<String> {
+  for line in content.lines() {
+    let trimmed = line.trim();
+
+    // Standard age-keygen comment.
+    if let Some(rest) = trimmed.strip_prefix("# public key: ") {
+      let key = rest.trim();
+      if key.starts_with("age1") {
+        return Some(key.to_string());
+      }
+    }
+
+    // Plugin comments (e.g. age-plugin-yubikey "# Recipient: age1yubikey1...").
+    if let Some(rest) = trimmed.strip_prefix("# Recipient: ") {
+      let key = rest.trim();
+      if key.starts_with("age1") {
+        return Some(key.to_string());
+      }
+    }
+  }
+
+  None
+}
 
 /// Scan an identity file for a `# public key: age1...` comment line.
 fn extract_pubkey_comment(path: &Path) -> Result<Option<String>, IdentityError> {
@@ -316,28 +361,7 @@ fn extract_pubkey_comment(path: &Path) -> Result<Option<String>, IdentityError> 
       path: path.to_string_lossy().into_owned(),
       source: e,
     })?;
-
-  for line in content.lines() {
-    let trimmed = line.trim();
-
-    // Standard age-keygen comment.
-    if let Some(rest) = trimmed.strip_prefix("# public key: ") {
-      let key = rest.trim();
-      if key.starts_with("age1") {
-        return Ok(Some(key.to_string()));
-      }
-    }
-
-    // Plugin comments (e.g. age-plugin-yubikey "# Recipient: age1yubikey1...").
-    if let Some(rest) = trimmed.strip_prefix("# Recipient: ") {
-      let key = rest.trim();
-      if key.starts_with("age1") {
-        return Ok(Some(key.to_string()));
-      }
-    }
-  }
-
-  Ok(None)
+  Ok(scan_pubkey_lines(&content))
 }
 
 // ── Recipient parsing ─────────────────────────────────────────────────────────
