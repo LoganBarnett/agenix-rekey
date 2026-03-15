@@ -1,0 +1,19 @@
+[package]
+name = "ragenix-rekey-lib"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tap = { workspace = true }
+
+[dev-dependencies]
+# cargo-husky installs git hooks when tests are run.
+# Run `cargo test -p ragenix-rekey-lib` to install hooks manually.
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }

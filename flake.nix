@@ -8,7 +8,12 @@
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    crane.url = "github:ipetkov/crane";
     pre-commit-hooks = {
       url = "github:cachix/pre-commit-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -80,7 +85,6 @@
               # Legacy alias for nixosConfigurations see https://github.com/oddlama/agenix-rekey/pull/51
               nodes ? { },
               # The package sets to use. pkgs.${system} must yield an initialized nixpkgs package set
-              pkgs ? pkgs,
               # A function that returns the age package given a package set. Use
               # this to override which tools is used for encrypting / decrypting.
               # Defaults to rage (pkgs.rage). We only guarantee compatibility for
@@ -126,16 +130,30 @@
           config,
           pkgs,
           lib,
+          system,
           ...
         }:
         {
+          _module.args.pkgs = import inputs.nixpkgs {
+            inherit system;
+            overlays = [ (import inputs.rust-overlay) ];
+          };
+
           checks.settings-module-tests = import ./tests/settings-module.nix {
             inherit pkgs lib;
-            nixpkgs = inputs.nixpkgs;
+            inherit (inputs) nixpkgs;
           };
           devshells.default = {
             packages = [
               config.treefmt.build.wrapper
+              (pkgs.rust-bin.stable.latest.default.override {
+                extensions = [
+                  "rust-src"
+                  "rust-analyzer"
+                  "rustfmt"
+                ];
+              })
+              pkgs.cargo-sweep
             ];
             devshell.startup.pre-commit.text = config.pre-commit.installationScript;
           };

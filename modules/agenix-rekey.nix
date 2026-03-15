@@ -144,7 +144,7 @@ let
             (listOf unspecified)
             (attrsOf unspecified)
           ];
-        example = literalExpression ''[ config.age.secrets.basicAuthPw1 nixosConfigurations.machine2.config.age.secrets.basicAuthPw ]'';
+        example = literalExpression "[ config.age.secrets.basicAuthPw1 nixosConfigurations.machine2.config.age.secrets.basicAuthPw ]";
         default = [ ];
         description = ''
           Other secrets on which this secret depends. This guarantees that in the final
@@ -235,27 +235,26 @@ let
 in
 {
   config = {
-    assertions =
-      [
-        {
-          assertion = config.age.rekey.masterIdentities != [ ];
-          message = "rekey.masterIdentities must be set.";
-        }
-      ]
-      ++ flatten (
-        flip mapAttrsToList config.age.secrets (
-          secretName: secretCfg: [
-            {
-              assertion = isString secretCfg.generator -> hasAttr secretCfg.generator config.age.generators;
-              message = "age.secrets.${secretName}: generator '`${secretCfg.generator}`' is not defined in `age.generators`.";
-            }
-            {
-              assertion = secretCfg.generator != null -> secretCfg.rekeyFile != null;
-              message = "age.secrets.${secretName}: `rekeyFile` must be set when using a generator.";
-            }
-          ]
-        )
-      );
+    assertions = [
+      {
+        assertion = config.age.rekey.masterIdentities != [ ];
+        message = "rekey.masterIdentities must be set.";
+      }
+    ]
+    ++ flatten (
+      flip mapAttrsToList config.age.secrets (
+        secretName: secretCfg: [
+          {
+            assertion = isString secretCfg.generator -> hasAttr secretCfg.generator config.age.generators;
+            message = "age.secrets.${secretName}: generator '`${secretCfg.generator}`' is not defined in `age.generators`.";
+          }
+          {
+            assertion = secretCfg.generator != null -> secretCfg.rekeyFile != null;
+            message = "age.secrets.${secretName}: `rekeyFile` must be set when using a generator.";
+          }
+        ]
+      )
+    );
 
     warnings =
       let
@@ -433,18 +432,12 @@ in
               # declared the type falls back to `nullOr attrs` for backward
               # compatibility with generators that treat settings as free-form.
               type =
-                if
-                  submod.config.generator != null
-                  && submod.config.generator.settingsModule != null
-                then
+                if submod.config.generator != null && submod.config.generator.settingsModule != null then
                   types.submodule submod.config.generator.settingsModule
                 else
                   types.nullOr types.attrs;
               default =
-                if
-                  submod.config.generator != null
-                  && submod.config.generator.settingsModule != null
-                then
+                if submod.config.generator != null && submod.config.generator.settingsModule != null then
                   { }
                 else
                   null;

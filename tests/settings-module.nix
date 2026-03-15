@@ -7,7 +7,11 @@
 # Usage (from flake.nix perSystem.checks):
 #   checks.settings-module-tests =
 #     import ./tests/settings-module.nix { inherit pkgs lib; nixpkgs = inputs.nixpkgs; };
-{ pkgs, lib, nixpkgs }:
+{
+  pkgs,
+  lib,
+  nixpkgs,
+}:
 let
   rekeyModule = import ../modules/agenix-rekey.nix nixpkgs;
 
@@ -66,18 +70,21 @@ let
         };
       };
     in
-    passIf (secrets.echoSecret.settings.message == "hello world") "settings are accessible after validation";
+    passIf (
+      secrets.echoSecret.settings.message == "hello world"
+    ) "settings are accessible after validation";
 
   # 2. Default values declared in settingsModule are applied when omitted.
   testDefaultValuesApplied =
     let
       secrets = evalSecrets {
         age.secrets.defaultSecret = {
-          generator.script = {
-            settings,
-            lib,
-            ...
-          }: "echo ${toString settings.count}";
+          generator.script =
+            {
+              settings,
+              ...
+            }:
+            "echo ${toString settings.count}";
           generator.settingsModule =
             { lib, ... }:
             {
@@ -90,7 +97,9 @@ let
         };
       };
     in
-    passIf (secrets.defaultSecret.settings.count == 42) "default values from settingsModule are applied";
+    passIf (
+      secrets.defaultSecret.settings.count == 42
+    ) "default values from settingsModule are applied";
 
   # 3. Backward compatibility: a generator without settingsModule still accepts
   #    free-form attrs in settings (the current behaviour from PR #75).
@@ -98,7 +107,7 @@ let
     let
       secrets = evalSecrets {
         age.secrets.legacySecret = {
-          generator.script = { ... }: ''echo "hello"'';
+          generator.script = _: ''echo "hello"'';
           settings = {
             whatever = "value";
             someInt = 99;
@@ -106,21 +115,23 @@ let
         };
       };
     in
-    passIf (secrets.legacySecret.settings.whatever == "value")
-      "generator without settingsModule accepts free-form attrs";
+    passIf (
+      secrets.legacySecret.settings.whatever == "value"
+    ) "generator without settingsModule accepts free-form attrs";
 
   # 4. When there is no settingsModule and settings is unset, it defaults to null.
   testDefaultNullWithoutSettingsModule =
     let
       secrets = evalSecrets {
         age.secrets.noSettingsSecret = {
-          generator.script = { ... }: ''echo "hello"'';
+          generator.script = _: ''echo "hello"'';
           # settings deliberately not set.
         };
       };
     in
-    passIf (secrets.noSettingsSecret.settings == null)
-      "settings defaults to null when no settingsModule is declared";
+    passIf (
+      secrets.noSettingsSecret.settings == null
+    ) "settings defaults to null when no settingsModule is declared";
 
   # 5. Multiple settings fields work together, including mixed required/optional.
   testMultipleSettingsFields =
@@ -128,8 +139,7 @@ let
       secrets = evalSecrets {
         age.secrets.multiSecret = {
           generator.script =
-            { settings, lib, ... }:
-            "echo ${lib.escapeShellArg settings.subject} ${toString settings.count}";
+            { settings, lib, ... }: "echo ${lib.escapeShellArg settings.subject} ${toString settings.count}";
           generator.settingsModule =
             { lib, ... }:
             {
@@ -148,9 +158,9 @@ let
         };
       };
     in
-    passIf
-      (secrets.multiSecret.settings.subject == "world" && secrets.multiSecret.settings.count == 3)
-      "multiple settings fields are accessible and defaults are overridable";
+    passIf (
+      secrets.multiSecret.settings.subject == "world" && secrets.multiSecret.settings.count == 3
+    ) "multiple settings fields are accessible and defaults are overridable";
 
   # 6. The echo generator (generators/echo.nix) works end-to-end.
   testEchoGenerator =
@@ -163,8 +173,9 @@ let
         };
       };
     in
-    passIf (secrets.echoSecret2.settings.message == "hunter2")
-      "echo generator accepts and exposes settings.message";
+    passIf (
+      secrets.echoSecret2.settings.message == "hunter2"
+    ) "echo generator accepts and exposes settings.message";
 
   # ── run all tests ────────────────────────────────────────────────────────────
 

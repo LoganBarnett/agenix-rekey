@@ -76,7 +76,7 @@ let
       declare -A masterIdentityMap
       # Master identities that have a pubkey can be added without further treatment.
       ${concatStringsSep "\n" (
-        map (x: ''masterIdentityMap[${escapeShellArg (removeSuffix "\n" x.pubkey)}]=${x.identity}'') (
+        map (x: "masterIdentityMap[${escapeShellArg (removeSuffix "\n" x.pubkey)}]=${x.identity}") (
           filter (x: x.pubkey != null) mergedMasterIdentities
         )
       )}

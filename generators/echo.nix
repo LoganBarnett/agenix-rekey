@@ -19,7 +19,7 @@
 # time, so the secret value is visible in your Nix configuration.  This
 # generator is intentionally simple; for real secrets use a generator that
 # produces random output.
-{ lib }:
+_:
 {
   settingsModule =
     { lib, ... }:
@@ -39,7 +39,5 @@
 
   # printf rather than echo to avoid a trailing newline, which many consumers
   # do not expect and which would change the encrypted output on each rekey.
-  script =
-    { settings, lib, ... }:
-    "printf '%s' ${lib.escapeShellArg settings.message}";
+  script = { settings, lib, ... }: "printf '%s' ${lib.escapeShellArg settings.message}";
 }
