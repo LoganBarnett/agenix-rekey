@@ -101,6 +101,11 @@ impl IdentitySession {
       if let Some(ref pubkey) = mi.pubkey {
         let recipient = parse_recipient_string(pubkey)?;
         recipients.push(recipient);
+      } else if is_passphrase_protected {
+        // Passphrase-protected identity files are binary age ciphertexts;
+        // read_to_string would fail with "invalid UTF-8".  If no explicit
+        // pubkey was given, skip rather than error — set `pubkey` in
+        // masterIdentities to enable encryption with this identity.
       } else if let Some(pubkey) = extract_pubkey_comment(path)? {
         match parse_recipient_string(&pubkey) {
           Ok(r) => recipients.push(r),

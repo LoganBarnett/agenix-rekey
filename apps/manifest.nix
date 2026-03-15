@@ -34,7 +34,6 @@ let
     removePrefix
     removeSuffix
     stringsWithDeps
-    warnIf
     ;
 
   inherit (import ../nix/lib.nix inputs)
@@ -68,9 +67,11 @@ let
         )
       ) (attrNames nodes);
     in
-    warnIf (length matchingHosts > 1)
-      "Multiple hosts provide a secret with rekeyFile=${toString secret.rekeyFile}, which may have undesired side effects in secret generator dependencies."
-      (head matchingHosts);
+    # Intentionally no warnIf here: shared secrets (e.g. a CA cert used by
+    # many hosts) would fire this warning once per dependency reference,
+    # which gets very noisy.  The original bash generate.nix warns at
+    # script-build time; we suppress the warning here at manifest-build time.
+    head matchingHosts;
 
   # ── Collect secrets with generators ─────────────────────────────────────────
 
