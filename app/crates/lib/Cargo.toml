@@ -13,7 +13,3 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tap = { workspace = true }
 
-[dev-dependencies]
-# cargo-husky installs git hooks when tests are run.
-# Run `cargo test -p ragenix-rekey-lib` to install hooks manually.
-cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
