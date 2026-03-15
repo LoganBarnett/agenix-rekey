@@ -33,6 +33,12 @@ pub enum IdentityError {
   #[error("Failed to read passphrase from terminal: {0}")]
   PassphraseRead(#[source] std::io::Error),
 
+  #[error(
+    "passphrase required for {path} but --no-prompt was set; \
+     use a plain (unencrypted) identity file or remove --no-prompt"
+  )]
+  PassphraseRequired { path: String },
+
   #[error("Invalid public key {pubkey}: {reason}")]
   InvalidPubkey { pubkey: String, reason: String },
 
@@ -70,6 +76,7 @@ impl IdentitySession {
   pub fn load(
     master_identities: &[MasterIdentity],
     extra_pubkeys: &[String],
+    no_prompt: bool,
   ) -> Result<Self, IdentityError> {
     let mut identities: Vec<Box<dyn age::Identity>> = Vec::new();
     let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
@@ -79,6 +86,11 @@ impl IdentitySession {
       let is_passphrase_protected = path.extension().map_or(false, |e| e == "age");
 
       let loaded_ids = if is_passphrase_protected {
+        if no_prompt {
+          return Err(IdentityError::PassphraseRequired {
+            path: path.to_string_lossy().into_owned(),
+          });
+        }
         load_passphrase_identity_file(path)?
       } else {
         load_plain_identity_file(path)?

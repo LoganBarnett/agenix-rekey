@@ -35,7 +35,20 @@ pub enum Command {
   },
 
   /// Re-encrypt master-encrypted secrets for each host's public key.
-  Rekey,
+  Rekey {
+    /// Force re-rekeying even when the output file already exists.
+    #[arg(short, long)]
+    force: bool,
+
+    /// Stage rekeyed (and removed orphan) files with `git add`.
+    #[arg(short = 'a', long = "add-to-git")]
+    add_to_git: bool,
+
+    /// Use a dummy secret value instead of decrypting.
+    /// Useful for testing NixOS builds in CI without master identity access.
+    #[arg(short, long)]
+    dummy: bool,
+  },
 
   /// Decrypt a secret, open it in $EDITOR, and re-encrypt on save.
   Edit {
@@ -69,6 +82,11 @@ pub struct CliRaw {
   #[arg(long, env = "RAGENIX_REKEY_MANIFEST", global = true)]
   pub manifest: Option<PathBuf>,
 
+  /// Fail immediately if any identity requires a passphrase prompt.
+  /// Useful for CI/automation to avoid blocking on interactive input.
+  #[arg(long, global = true)]
+  pub no_prompt: bool,
+
   #[command(subcommand)]
   pub command: Command,
 }
@@ -78,6 +96,7 @@ pub struct Config {
   pub log_level: LogLevel,
   pub log_format: LogFormat,
   pub manifest: Option<PathBuf>,
+  pub no_prompt: bool,
   pub command: Command,
 }
 
@@ -99,6 +118,7 @@ impl Config {
       log_level,
       log_format,
       manifest: cli.manifest,
+      no_prompt: cli.no_prompt,
       command: cli.command,
     })
   }

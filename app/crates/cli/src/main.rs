@@ -25,6 +25,7 @@ use std::path::Path;
 use thiserror::Error;
 
 use commands::generate::{GenerateArgs, GenerateError};
+use commands::rekey::{RekeyArgs, RekeyError};
 
 #[derive(Debug, Error)]
 enum ApplicationError {
@@ -50,6 +51,9 @@ enum ApplicationError {
 
   #[error("Generate failed: {0}")]
   Generate(#[from] GenerateError),
+
+  #[error("Rekey failed: {0}")]
+  Rekey(#[from] RekeyError),
 
   #[error("Operation not yet implemented: {0}")]
   NotImplemented(String),
@@ -82,12 +86,18 @@ fn run(config: Config) -> Result<(), ApplicationError> {
         add_to_git,
         tags,
         filter,
+        no_prompt: config.no_prompt,
       };
       commands::generate::run(&args, &manifest)?;
       Ok(())
     }
 
-    Command::Rekey => Err(ApplicationError::NotImplemented("rekey".into())),
+    Command::Rekey { force, add_to_git, dummy } => {
+      let manifest = load_manifest(config.manifest.as_deref())?;
+      let args = RekeyArgs { force, add_to_git, dummy, no_prompt: config.no_prompt };
+      commands::rekey::run(&args, &manifest)?;
+      Ok(())
+    }
 
     Command::Edit { file } => {
       let _ = file;

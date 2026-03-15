@@ -47,5 +47,8 @@ secrecy = "0.10"
 # Temporary directories for dep decryption staging
 tempfile = "3"
 
+# Hashing (for rekey ident hash computation)
+sha2 = "0.10"
+
 # Shared library
 ragenix-rekey-lib = { path = "crates/lib" }

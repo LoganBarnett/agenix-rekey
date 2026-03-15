@@ -113,10 +113,11 @@
                   cargoExtraArgs = "--bin ragenix-rekey";
                 };
                 # Map app names to alternate implementation files.
-                # "generate" uses the Rust runtime; apps/generate.nix (the
-                # original bash version) is kept for reference during transition.
+                # Rust runtime replaces the original bash versions; the .nix
+                # files are kept for reference during the transition.
                 appImpls = {
                   generate = "rust-generate";
+                  rekey = "rust-rekey";
                 };
               in
               lib.genAttrs allApps (

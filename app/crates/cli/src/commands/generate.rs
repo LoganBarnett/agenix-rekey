@@ -87,6 +87,8 @@ pub struct GenerateArgs {
   pub tags: Vec<String>,
   /// Limit generation to these paths (relative to flake root).
   pub filter: Vec<String>,
+  /// Fail if a passphrase prompt would be needed to load an identity.
+  pub no_prompt: bool,
 }
 
 /// Run the generate command.
@@ -125,8 +127,11 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
   }
 
   // Load identities now — may prompt for passphrases.
-  let session =
-    IdentitySession::load(&manifest.master_identities, &manifest.extra_encryption_pubkeys)?;
+  let session = IdentitySession::load(
+    &manifest.master_identities,
+    &manifest.extra_encryption_pubkeys,
+    args.no_prompt,
+  )?;
 
   if session.recipients.is_empty() {
     return Err(GenerateError::NoRecipients);
