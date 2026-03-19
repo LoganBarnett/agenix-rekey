@@ -84,13 +84,15 @@ let
         ) "Host ${host}: age.secrets.${secretName}: `rekeyFile` must be set when using a generator.";
         relativeToFlake secret.rekeyFile;
 
-      # Generate the script string with __RAGENIX_DECRYPT__ as the placeholder.
+      # Generate the script string with placeholders for runtime values.
+      # The Rust runtime substitutes these at invocation time.
       script = secret.generator._script {
         inherit secret pkgs;
         inherit (pkgs) lib;
         file = sourceFile;
         name = secretName;
         decrypt = "__RAGENIX_DECRYPT__";
+        gitAdd = "__RAGENIX_GIT_ADD__";
         settings = if secret.settings != null then secret.settings else { };
         deps = flip mapListOrAttrs secret.generator.dependencies (dep: {
           host = findHost dep;

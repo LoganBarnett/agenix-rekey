@@ -255,8 +255,18 @@ fn generate_entry(
     .to_str()
     .unwrap_or("/dev/null");
 
-  // Substitute the __RAGENIX_DECRYPT__ placeholder baked into the script.
-  let script = entry.script.replace("__RAGENIX_DECRYPT__", wrapper_str);
+  // Write the git-add wrapper script.
+  let git_add_path = dep_dir.path().join("git-add");
+  write_git_add_wrapper(&git_add_path, add_to_git)?;
+
+  let git_add_str = git_add_path
+    .to_str()
+    .unwrap_or("true");
+
+  // Substitute the placeholders baked into the script by apps/manifest.nix.
+  let script = entry.script
+    .replace("__RAGENIX_DECRYPT__", wrapper_str)
+    .replace("__RAGENIX_GIT_ADD__", git_add_str);
 
   // Derive $name from the first "host:secretName" def, or fall back to path.
   let name = entry
@@ -271,6 +281,8 @@ fn generate_entry(
     .arg(&script)
     // Set $decrypt for bash-style `$decrypt dep.age` usage (backward compat).
     .env("decrypt", wrapper_str)
+    // Set $gitAdd so generators can call it without Nix interpolation.
+    .env("gitAdd", git_add_str)
     // Conventional env vars that generators may reference.
     .env("file", &entry.path)
     .env("name", name)
@@ -347,6 +359,26 @@ fn write_decrypt_wrapper(
   file.write_all(script.as_bytes())?;
   drop(file);
 
+  set_mode_700(wrapper_path)?;
+
+  Ok(())
+}
+
+/// Write a shell script that either runs `git add "$@"` or silently no-ops,
+/// depending on whether `add_to_git` is true.
+///
+/// Generator scripts receive the path to this wrapper as `$gitAdd` (env var)
+/// or via `__RAGENIX_GIT_ADD__` substitution (Nix interpolation style), and
+/// call it unconditionally on any companion files they write alongside the
+/// encrypted secret (e.g. a `.pub` key for a generated private key).
+fn write_git_add_wrapper(wrapper_path: &Path, add_to_git: bool) -> Result<(), std::io::Error> {
+  let script = if add_to_git {
+    "#!/bin/sh\nexec git add \"$@\"\n"
+  } else {
+    "#!/bin/sh\ntrue\n"
+  };
+
+  std::fs::write(wrapper_path, script)?;
   set_mode_700(wrapper_path)?;
 
   Ok(())
@@ -551,6 +583,52 @@ mod tests {
 
     let entry = make_entry_with_dep("output.age", "ghost.age"); // ghost.age doesn't exist
     assert!(!deps_are_newer(&entry, &output, dir.path()));
+  }
+
+  // ── write_git_add_wrapper ────────────────────────────────────────────────────
+
+  #[test]
+  fn git_add_wrapper_noop_when_false() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("git-add");
+    write_git_add_wrapper(&path, false).unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(
+      content.contains("true"),
+      "expected no-op script to contain 'true', got: {content}"
+    );
+    assert!(
+      !content.contains("git add"),
+      "expected no-op script not to call git add, got: {content}"
+    );
+  }
+
+  #[test]
+  fn git_add_wrapper_executes_git_add_when_true() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("git-add");
+    write_git_add_wrapper(&path, true).unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(
+      content.contains("git add"),
+      "expected active script to contain 'git add', got: {content}"
+    );
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn git_add_wrapper_is_mode_700() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("git-add");
+    write_git_add_wrapper(&path, false).unwrap();
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(
+      mode & 0o777,
+      0o700,
+      "expected mode 0700, got {:o}",
+      mode & 0o777
+    );
   }
 
   // ── shell_single_quote ───────────────────────────────────────────────────────

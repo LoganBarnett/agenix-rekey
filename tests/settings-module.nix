@@ -177,6 +177,34 @@ let
       secrets.echoSecret2.settings.message == "hunter2"
     ) "echo generator accepts and exposes settings.message";
 
+  # 7. Generator scripts receive `gitAdd` as an argument and can interpolate it.
+  #    Calling _script with a sentinel value verifies the argument is threaded
+  #    through — if it were missing the script would contain a literal empty
+  #    string or the Nix interpolation would fail evaluation.
+  testGitAddPassedToScript =
+    let
+      secrets = evalSecrets {
+        age.secrets.gitAddSecret = {
+          generator.script = { gitAdd, ... }: "call ${gitAdd} here";
+        };
+      };
+      sentinel = "/nix/store/fake-git-add";
+      script = secrets.gitAddSecret.generator._script {
+        inherit pkgs;
+        inherit (pkgs) lib;
+        file = "./git-add-test.age";
+        name = "gitAddSecret";
+        secret = secrets.gitAddSecret;
+        decrypt = "/nix/store/fake-decrypt";
+        gitAdd = sentinel;
+        settings = { };
+        deps = [ ];
+      };
+    in
+    passIf (
+      lib.hasInfix sentinel script
+    ) "gitAdd argument is threaded through to generator scripts";
+
   # ── run all tests ────────────────────────────────────────────────────────────
 
   allResults = [
@@ -186,6 +214,7 @@ let
     testDefaultNullWithoutSettingsModule
     testMultipleSettingsFields
     testEchoGenerator
+    testGitAddPassedToScript
   ];
 in
 # Build a derivation whose shell script is constructed by Nix string

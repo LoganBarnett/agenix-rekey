@@ -63,6 +63,12 @@ let
     filter (x: x != null) (map relativeToFlake mergedSecrets)
   );
 
+  gitAddScript = pkgs.writeShellScript "agenix-git-add" ''
+    if [[ "${ADD_TO_GIT:-false}" == true ]]; then
+      exec ${pkgs.git}/bin/git add "$@"
+    fi
+  '';
+
   ageWrapperScript = pkgs.writeShellApplication {
     name = "ageWrapper";
     runtimeInputs = with pkgs; [ gnugrep ];
@@ -188,6 +194,14 @@ in
   inherit mergedSecrets;
   inherit mergedMasterIdentities;
   inherit mergedExtraEncryptionPubkeys;
+
+  # Shell command that git-adds its arguments when -a/--add-to-git is active,
+  # and silently no-ops otherwise.  Generator scripts receive this as `gitAdd`
+  # (Nix interpolation) or `$gitAdd` (env var) and can call it unconditionally
+  # on any companion files they write (e.g. a .pub key alongside a private key).
+  # The script reads $ADD_TO_GIT from the environment, which is exported by the
+  # generate script after argument parsing.
+  gitAdd = toString gitAddScript;
 
   # Premade shell commands to encrypt and decrypt secrets.
   # NOTE: In order to keep compatibility with existing generator setups,
