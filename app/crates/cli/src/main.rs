@@ -103,9 +103,11 @@ fn run(config: Config) -> Result<(), ApplicationError> {
         };
 
         let gen_plan = commands::generate::plan(&gen_args, &manifest)?;
-        let rekey_plan = commands::rekey::plan(&rekey_args, &manifest)?;
+        // Pre-plan rekey against the current state solely to determine whether
+        // there is any work at all before prompting for a passphrase.
+        let pre_rekey_plan = commands::rekey::plan(&rekey_args, &manifest)?;
 
-        if gen_plan.is_empty() && rekey_plan.is_empty() {
+        if gen_plan.is_empty() && pre_rekey_plan.is_empty() {
           tracing::info!("nothing to generate or rekey (all secrets up to date)");
           return Ok(());
         }
@@ -125,6 +127,10 @@ fn run(config: Config) -> Result<(), ApplicationError> {
           commands::generate::execute(gen_plan, &gen_args, &session)?;
         }
 
+        // Re-plan rekey after generation so that freshly generated secrets
+        // (whose ident hash changes with their content) are included.  The
+        // pre-plan above was only used for the early-exit check.
+        let rekey_plan = commands::rekey::plan(&rekey_args, &manifest)?;
         commands::rekey::execute(rekey_plan, &rekey_args, &session)?;
       } else {
         commands::generate::run(&gen_args, &manifest)?;
