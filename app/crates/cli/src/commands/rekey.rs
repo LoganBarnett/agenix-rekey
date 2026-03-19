@@ -96,19 +96,47 @@ pub struct RekeyArgs {
   pub no_prompt: bool,
 }
 
-/// Run the rekey command.
+// ── Plan / execute split ───────────────────────────────────────────────────────
+
+struct WorkItem<'m> {
+  hostname: &'m str,
+  host: &'m HostConfig,
+  storage_dir: PathBuf,
+  /// Secrets that need rekeying: (name, host_secret, output_path)
+  pending: Vec<(&'m String, &'m HostSecret, PathBuf)>,
+  /// All expected output paths for this host (for orphan cleanup).
+  all_outputs: HashSet<PathBuf>,
+}
+
+/// Work determined during the planning phase, before any identity is loaded.
 ///
-/// Identity loading (and any passphrase prompt) is deferred until after we
-/// know there is at least one secret that actually needs rekeying.
-pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
-  // `manifest.flake_dir` is the Nix store copy of the user's flake (read-only)
-  // and is used only for reading source `.age` files during decryption.
-  // All output paths are resolved relative to CWD, which must be the user's
-  // actual flake root (same contract as the bash rekey script).
-  let flake_dir = &manifest.flake_dir;
+/// Produced by [`plan`] and consumed by [`execute`].  Exposed so callers can
+/// inspect whether there is anything to do before prompting for passphrases
+/// (e.g. the combined generate + rekey flow in `main.rs`).
+pub struct RekeyPlan<'m> {
+  items: Vec<WorkItem<'m>>,
+  cwd: PathBuf,
+  /// Nix store path of the flake; used as a fallback for source `.age` files
+  /// that have not yet been committed (freshly generated secrets are found in
+  /// CWD first; only then do we fall back to this read-only copy).
+  flake_dir: PathBuf,
+}
+
+impl RekeyPlan<'_> {
+  pub fn is_empty(&self) -> bool {
+    self.items.is_empty()
+  }
+}
+
+/// Determine which secrets need rekeying without loading any identities.
+///
+/// Partitions hosts by storage mode, checks staleness, and prints "skipping"
+/// lines for up-to-date secrets.  Returns a [`RekeyPlan`] that can be passed
+/// to [`execute`] once an [`IdentitySession`] is available.
+pub fn plan<'m>(args: &RekeyArgs, manifest: &'m Manifest) -> Result<RekeyPlan<'m>, RekeyError> {
+  let flake_dir = manifest.flake_dir.clone();
   let cwd = std::env::current_dir()?;
 
-  // Partition hosts, warn about unsupported modes.
   let mut local_hosts: Vec<(&String, &HostConfig)> = Vec::new();
 
   let mut hosts: Vec<(&String, &HostConfig)> = manifest.hosts.iter().collect();
@@ -135,18 +163,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     }
   }
 
-  // Determine what needs rekeying before loading identities.
-  struct WorkItem<'a> {
-    hostname: &'a str,
-    host: &'a HostConfig,
-    storage_dir: PathBuf,
-    /// Secrets that need rekeying: (name, host_secret, output_path)
-    pending: Vec<(&'a String, &'a HostSecret, PathBuf)>,
-    /// All expected output paths for this host (for orphan cleanup).
-    all_outputs: HashSet<PathBuf>,
-  }
-
-  let mut work: Vec<WorkItem> = Vec::new();
+  let mut items: Vec<WorkItem<'m>> = Vec::new();
 
   for (hostname, host) in &local_hosts {
     // `local_storage_dir` is a flake-relative path (e.g. "./secrets/rekeyed/host").
@@ -179,7 +196,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     }
 
     if !pending.is_empty() {
-      work.push(WorkItem {
+      items.push(WorkItem {
         hostname,
         host,
         storage_dir,
@@ -189,21 +206,14 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
     }
   }
 
-  if work.is_empty() {
-    tracing::info!("nothing to rekey (all secrets up to date)");
-    return Ok(());
-  }
+  Ok(RekeyPlan { items, cwd, flake_dir })
+}
 
-  // Load identities now — may prompt for passphrases.
-  let session = IdentitySession::load(
-    &manifest.master_identities,
-    &manifest.extra_encryption_pubkeys,
-    args.no_prompt,
-  )?;
-
+/// Rekey all secrets in a plan using a pre-loaded session.
+pub fn execute(plan: RekeyPlan<'_>, args: &RekeyArgs, session: &IdentitySession) -> Result<(), RekeyError> {
   let mut total = 0usize;
 
-  for item in &work {
+  for item in &plan.items {
     let host_recipients = vec![
       parse_recipient_string(&item.host.pubkey).map_err(|e| RekeyError::InvalidPubkey {
         host: item.hostname.to_string(),
@@ -221,8 +231,8 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
       // therefore absent from the read-only flake_dir store path) can be
       // rekeyed immediately without requiring a git commit + flake rebuild.
       let src_path = {
-        let cwd_path = cwd.join(&secret.rekey_file);
-        if cwd_path.exists() { cwd_path } else { flake_dir.join(&secret.rekey_file) }
+        let cwd_path = plan.cwd.join(&secret.rekey_file);
+        if cwd_path.exists() { cwd_path } else { plan.flake_dir.join(&secret.rekey_file) }
       };
 
       let plaintext = if args.dummy {
@@ -259,7 +269,7 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
       let status = std::process::Command::new("git")
         .arg("add")
         .arg(&item.storage_dir)
-        .current_dir(&cwd)
+        .current_dir(&plan.cwd)
         .status()?;
       if !status.success() {
         tracing::warn!(path = %item.storage_dir.display(), "git add returned non-zero");
@@ -269,6 +279,28 @@ pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
 
   tracing::info!(rekeyed = total, "rekey complete");
   Ok(())
+}
+
+/// Run the rekey command.
+///
+/// Identity loading (and any passphrase prompt) is deferred until after we
+/// know there is at least one secret that actually needs rekeying.
+pub fn run(args: &RekeyArgs, manifest: &Manifest) -> Result<(), RekeyError> {
+  let work = plan(args, manifest)?;
+
+  if work.is_empty() {
+    tracing::info!("nothing to rekey (all secrets up to date)");
+    return Ok(());
+  }
+
+  // Load identities now — may prompt for passphrases.
+  let session = IdentitySession::load(
+    &manifest.master_identities,
+    &manifest.extra_encryption_pubkeys,
+    args.no_prompt,
+  )?;
+
+  execute(work, args, &session)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

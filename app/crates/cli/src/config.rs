@@ -32,6 +32,11 @@ pub enum Command {
     /// May be specified multiple times.
     #[arg(short, long, value_name = "TAGS")]
     tags: Vec<String>,
+
+    /// After generating, also rekey all secrets for every host.
+    /// Runs generate then rekey in one step with a single passphrase prompt.
+    #[arg(long)]
+    rekey: bool,
   },
 
   /// Re-encrypt master-encrypted secrets for each host's public key.

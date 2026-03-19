@@ -93,15 +93,28 @@ pub struct GenerateArgs {
   pub no_prompt: bool,
 }
 
-/// Run the generate command.
+/// Work determined during the planning phase, before any identity is loaded.
 ///
-/// Identity loading (and any passphrase prompt) is deferred until after we
-/// know there is at least one entry that actually needs (re)generation.
-/// A no-op run (all secrets up-to-date) exits without touching identities.
-pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError> {
-  // `manifest.flake_dir` is the Nix store copy of the user's flake (read-only).
-  // All output is written relative to CWD, which must be the user's actual
-  // flake root (same contract as the bash generate script).
+/// Produced by [`plan`] and consumed by [`execute`].  Exposed so callers can
+/// inspect whether there is anything to do before prompting for passphrases
+/// (e.g. the combined generate + rekey flow in `main.rs`).
+pub struct GeneratePlan<'m> {
+  entries: Vec<&'m GenerateEntry>,
+  cwd: PathBuf,
+}
+
+impl GeneratePlan<'_> {
+  pub fn is_empty(&self) -> bool {
+    self.entries.is_empty()
+  }
+}
+
+/// Determine which entries need (re)generation without loading any identities.
+///
+/// Validates filter paths, checks staleness, and prints "skipping" lines for
+/// up-to-date entries.  Returns a [`GeneratePlan`] that can be passed to
+/// [`execute`] once an [`IdentitySession`] is available.
+pub fn plan<'m>(args: &GenerateArgs, manifest: &'m Manifest) -> Result<GeneratePlan<'m>, GenerateError> {
   let cwd = std::env::current_dir()?;
 
   // Validate filter paths up-front for a clear error message.
@@ -115,21 +128,44 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
     }
   }
 
-  // Determine which entries need (re)generation before loading identities.
-  // Iterate every in-scope entry so we can print a status line for each one,
-  // including those that are already up to date.
-  let mut to_generate: Vec<&GenerateEntry> = Vec::new();
+  let mut entries: Vec<&'m GenerateEntry> = Vec::new();
 
   for entry in manifest.generate.iter().filter(|e| wants_entry(e, &args.filter, &args.tags)) {
     let output_path = cwd.join(&entry.path);
     if !args.force && output_path.exists() && !deps_are_newer(entry, &output_path, &cwd) {
       status::skipped(&entry.path);
     } else {
-      to_generate.push(entry);
+      entries.push(entry);
     }
   }
 
-  if to_generate.is_empty() {
+  Ok(GeneratePlan { entries, cwd })
+}
+
+/// Run generation for all entries in a plan using a pre-loaded session.
+///
+/// Callers are responsible for ensuring `session.recipients` is non-empty
+/// before calling this function.
+pub fn execute(plan: GeneratePlan<'_>, args: &GenerateArgs, session: &IdentitySession) -> Result<(), GenerateError> {
+  let count = plan.entries.len();
+  for entry in plan.entries {
+    tracing::debug!(path = %entry.path, defs = ?entry.defs, "generating");
+    let output_path = plan.cwd.join(&entry.path);
+    generate_entry(entry, &output_path, &plan.cwd, args.add_to_git, session)?;
+  }
+  tracing::info!(generated = count, "generate complete");
+  Ok(())
+}
+
+/// Run the generate command.
+///
+/// Identity loading (and any passphrase prompt) is deferred until after we
+/// know there is at least one entry that actually needs (re)generation.
+/// A no-op run (all secrets up-to-date) exits without touching identities.
+pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError> {
+  let work = plan(args, manifest)?;
+
+  if work.is_empty() {
     tracing::info!("nothing to generate (all secrets up to date)");
     return Ok(());
   }
@@ -145,15 +181,7 @@ pub fn run(args: &GenerateArgs, manifest: &Manifest) -> Result<(), GenerateError
     return Err(GenerateError::NoRecipients);
   }
 
-  let count = to_generate.len();
-  for entry in to_generate {
-    tracing::debug!(path = %entry.path, defs = ?entry.defs, "generating");
-    let output_path = cwd.join(&entry.path);
-    generate_entry(entry, &output_path, &cwd, args.add_to_git, &session)?;
-  }
-
-  tracing::info!(generated = count, "generate complete");
-  Ok(())
+  execute(work, args, &session)
 }
 
 // ── Filter logic ──────────────────────────────────────────────────────────────

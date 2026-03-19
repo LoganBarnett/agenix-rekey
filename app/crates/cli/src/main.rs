@@ -27,6 +27,7 @@ use thiserror::Error;
 
 use commands::generate::{GenerateArgs, GenerateError};
 use commands::rekey::{RekeyArgs, RekeyError};
+use ragenix_rekey_lib::IdentitySession;
 
 #[derive(Debug, Error)]
 enum ApplicationError {
@@ -80,16 +81,55 @@ fn run(config: Config) -> Result<(), ApplicationError> {
       force,
       add_to_git,
       tags,
+      rekey: also_rekey,
     } => {
       let manifest = load_manifest(config.manifest.as_deref())?;
-      let args = GenerateArgs {
+      let gen_args = GenerateArgs {
         force,
         add_to_git,
         tags,
         filter,
         no_prompt: config.no_prompt,
       };
-      commands::generate::run(&args, &manifest)?;
+
+      if also_rekey {
+        // Combined generate + rekey: load identities at most once, even if
+        // only one side has work to do.
+        let rekey_args = RekeyArgs {
+          force: false,
+          add_to_git,
+          dummy: false,
+          no_prompt: config.no_prompt,
+        };
+
+        let gen_plan = commands::generate::plan(&gen_args, &manifest)?;
+        let rekey_plan = commands::rekey::plan(&rekey_args, &manifest)?;
+
+        if gen_plan.is_empty() && rekey_plan.is_empty() {
+          tracing::info!("nothing to generate or rekey (all secrets up to date)");
+          return Ok(());
+        }
+
+        // Single passphrase prompt covers both operations.
+        let session = IdentitySession::load(
+          &manifest.master_identities,
+          &manifest.extra_encryption_pubkeys,
+          config.no_prompt,
+        )
+        .map_err(|e| ApplicationError::Generate(GenerateError::Identity(e)))?;
+
+        if !gen_plan.is_empty() {
+          if session.recipients.is_empty() {
+            return Err(ApplicationError::Generate(GenerateError::NoRecipients));
+          }
+          commands::generate::execute(gen_plan, &gen_args, &session)?;
+        }
+
+        commands::rekey::execute(rekey_plan, &rekey_args, &session)?;
+      } else {
+        commands::generate::run(&gen_args, &manifest)?;
+      }
+
       Ok(())
     }
 
